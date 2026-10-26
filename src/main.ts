@@ -665,7 +665,7 @@ initActionButtons(
               };
             }
           ).claude;
-          downloads = claude && (await claude.use('downloads'));
+          const downloads = claude && (await claude.use('downloads'));
           if (downloads) {
             await downloads.save({ filename, data: blob });
             return;

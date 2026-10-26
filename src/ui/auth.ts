@@ -4,14 +4,16 @@ import { supabase } from '../api/supabase';
 export type AuthMode = 'signin' | 'signup';
 
 export interface AuthElements {
-  modal: HTMLElement;
+  authScreen: HTMLElement;
+  appRoot: HTMLElement;
+  disabledScreen?: HTMLElement | null;
+  disabledSignOutButton?: HTMLElement | null;
   form: HTMLFormElement;
   emailInput: HTMLInputElement;
   passwordInput: HTMLInputElement;
   errorContainer: HTMLElement;
   successContainer?: HTMLElement | null;
-  authButton: HTMLElement;
-  cancelButton?: HTMLElement | null;
+  authButton?: HTMLElement | null;
   tabSignIn?: HTMLElement | null;
   tabSignUp?: HTMLElement | null;
   title?: HTMLElement | null;
@@ -20,49 +22,43 @@ export interface AuthElements {
 }
 
 export interface AuthCallbacks {
-  onLogin?: (user: User) => void;
-  onSignOut?: () => void;
+  onLogin?: (user: User) => void | Promise<void>;
+  onSignOut?: () => void | Promise<void>;
 }
 
-/**
- * Displays the login modal dialog.
- */
-export function showLoginModal(
-  modal: HTMLElement,
-  errorContainer?: HTMLElement,
-  successContainer?: HTMLElement | null
-): void {
-  if (errorContainer) {
-    errorContainer.textContent = '';
-    errorContainer.classList.remove('visible');
+export function showAuthScreen(elements: {
+  authScreen: HTMLElement;
+  appRoot: HTMLElement;
+  disabledScreen?: HTMLElement | null;
+}): void {
+  elements.authScreen.style.display = 'flex';
+  elements.appRoot.style.display = 'none';
+  if (elements.disabledScreen) {
+    elements.disabledScreen.style.display = 'none';
   }
-  if (successContainer) {
-    successContainer.textContent = '';
-    successContainer.classList.remove('visible');
-  }
-  modal.classList.add('open');
 }
 
-/**
- * Hides the login modal and clears form state.
- */
-export function hideLoginModal(
-  modal: HTMLElement,
-  form?: HTMLFormElement,
-  errorContainer?: HTMLElement,
-  successContainer?: HTMLElement | null
-): void {
-  modal.classList.remove('open');
-  if (form) {
-    form.reset();
+export function showAppScreen(elements: {
+  authScreen: HTMLElement;
+  appRoot: HTMLElement;
+  disabledScreen?: HTMLElement | null;
+}): void {
+  elements.authScreen.style.display = 'none';
+  elements.appRoot.style.display = 'block';
+  if (elements.disabledScreen) {
+    elements.disabledScreen.style.display = 'none';
   }
-  if (errorContainer) {
-    errorContainer.textContent = '';
-    errorContainer.classList.remove('visible');
-  }
-  if (successContainer) {
-    successContainer.textContent = '';
-    successContainer.classList.remove('visible');
+}
+
+export function showDisabledScreen(elements: {
+  authScreen: HTMLElement;
+  appRoot: HTMLElement;
+  disabledScreen?: HTMLElement | null;
+}): void {
+  elements.authScreen.style.display = 'none';
+  elements.appRoot.style.display = 'none';
+  if (elements.disabledScreen) {
+    elements.disabledScreen.style.display = 'flex';
   }
 }
 
@@ -70,7 +66,7 @@ export function hideLoginModal(
  * Signs out the current Supabase session.
  */
 export async function signOut(
-  onSignOut?: () => void
+  onSignOut?: () => void | Promise<void>
 ): Promise<{ error: Error | null }> {
   try {
     const { error } = await supabase.auth.signOut();
@@ -78,7 +74,7 @@ export async function signOut(
       return { error: new Error(error.message) };
     }
     if (onSignOut) {
-      onSignOut();
+      await onSignOut();
     }
     return { error: null };
   } catch (err) {
@@ -89,15 +85,7 @@ export async function signOut(
 }
 
 /**
- * Updates the header auth button text based on whether a user is logged in.
- */
-export function updateAuthButton(button: HTMLElement, user: User | null): void {
-  button.textContent = user ? 'Sign Out' : 'Sign In';
-  button.title = user ? `Logged in as ${user.email}` : 'Sign in to access account';
-}
-
-/**
- * Initializes authentication listeners, login/signup form handlers, and modal controls.
+ * Initializes authentication listeners, login/signup form handlers, and gate screens.
  * Returns a cleanup unbind function.
  */
 export function initAuth(
@@ -121,9 +109,10 @@ export function initAuth(
     if (mode === 'signin') {
       elements.tabSignIn?.classList.add('on');
       elements.tabSignUp?.classList.remove('on');
-      if (elements.title) elements.title.textContent = 'Sign In';
+      if (elements.title) elements.title.textContent = 'RCD Status Map';
       if (elements.subtitle) {
-        elements.subtitle.textContent = 'Sign in to access editor tools or view live map status';
+        elements.subtitle.textContent =
+          'Sign in to view real-time subdivision lot availability';
       }
       if (elements.submitButton) elements.submitButton.textContent = 'Sign In';
     } else {
@@ -131,75 +120,69 @@ export function initAuth(
       elements.tabSignIn?.classList.remove('on');
       if (elements.title) elements.title.textContent = 'Create Viewer Account';
       if (elements.subtitle) {
-        elements.subtitle.textContent = 'Sign up to watch real-time subdivision status updates';
+        elements.subtitle.textContent =
+          'Sign up to watch real-time subdivision status updates';
       }
       if (elements.submitButton) elements.submitButton.textContent = 'Create Account';
     }
   };
 
-  // Tab click listeners
+  // Tab switching
   const handleTabSignIn = () => setAuthMode('signin');
   const handleTabSignUp = () => setAuthMode('signup');
   elements.tabSignIn?.addEventListener('click', handleTabSignIn);
   elements.tabSignUp?.addEventListener('click', handleTabSignUp);
 
   // Sync initial auth state
-  supabase.auth.getSession().then(({ data }) => {
+  supabase.auth.getSession().then(async ({ data }) => {
     currentUser = data.session?.user || null;
-    updateAuthButton(elements.authButton, currentUser);
-    if (currentUser && callbacks.onLogin) {
-      callbacks.onLogin(currentUser);
+    if (currentUser) {
+      if (callbacks.onLogin) {
+        await callbacks.onLogin(currentUser);
+      }
+    } else {
+      showAuthScreen(elements);
+      if (callbacks.onSignOut) {
+        await callbacks.onSignOut();
+      }
     }
   });
 
   // Listen to session state changes
-  const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+  const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
-    updateAuthButton(elements.authButton, currentUser);
     if (currentUser) {
-      if (callbacks.onLogin) callbacks.onLogin(currentUser);
+      if (callbacks.onLogin) {
+        await callbacks.onLogin(currentUser);
+      }
     } else {
-      if (callbacks.onSignOut) callbacks.onSignOut();
+      showAuthScreen(elements);
+      if (callbacks.onSignOut) {
+        await callbacks.onSignOut();
+      }
     }
   });
 
-  // Auth button click toggle
+  // Header auth button (Sign Out)
   const handleAuthButtonClick = async () => {
     if (currentUser) {
-      await signOut(callbacks.onSignOut);
+      await signOut(async () => {
+        showAuthScreen(elements);
+        if (callbacks.onSignOut) await callbacks.onSignOut();
+      });
     } else {
-      setAuthMode('signin');
-      showLoginModal(elements.modal, elements.errorContainer, elements.successContainer);
-      elements.emailInput.focus();
+      showAuthScreen(elements);
     }
   };
-  elements.authButton.addEventListener('click', handleAuthButtonClick);
+  elements.authButton?.addEventListener('click', handleAuthButtonClick);
 
-  // Close / Cancel modal
-  const handleCancelClick = () => {
-    hideLoginModal(
-      elements.modal,
-      elements.form,
-      elements.errorContainer,
-      elements.successContainer
-    );
-  };
-  if (elements.cancelButton) {
-    elements.cancelButton.addEventListener('click', handleCancelClick);
-  }
-
-  // Backdrop click to close
-  const handleBackdropClick = (e: MouseEvent) => {
-    if (e.target === elements.modal) {
-      hideLoginModal(
-        elements.modal,
-        elements.form,
-        elements.errorContainer,
-        elements.successContainer
-      );
-    }
-  };
-  elements.modal.addEventListener('click', handleBackdropClick);
+  // Disabled account sign out button
+  elements.disabledSignOutButton?.addEventListener('click', async () => {
+    await signOut(async () => {
+      showAuthScreen(elements);
+      if (callbacks.onSignOut) await callbacks.onSignOut();
+    });
+  });
 
   // Form submission: sign in OR sign up
   const handleFormSubmit = async (e: Event) => {
@@ -216,9 +199,13 @@ export function initAuth(
     const email = elements.emailInput.value.trim();
     const password = elements.passwordInput.value;
 
-    const submitBtn = elements.submitButton ||
+    const submitBtn =
+      elements.submitButton ||
       elements.form.querySelector<HTMLButtonElement>('button[type="submit"]');
-    if (submitBtn) submitBtn.disabled = true;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = currentMode === 'signin' ? 'Signing in...' : 'Creating...';
+    }
 
     try {
       if (currentMode === 'signin') {
@@ -233,15 +220,8 @@ export function initAuth(
           return;
         }
 
-        hideLoginModal(
-          elements.modal,
-          elements.form,
-          elements.errorContainer,
-          elements.successContainer
-        );
-
         if (data.user && callbacks.onLogin) {
-          callbacks.onLogin(data.user);
+          await callbacks.onLogin(data.user);
         }
       } else {
         // Sign Up flow
@@ -256,46 +236,39 @@ export function initAuth(
           return;
         }
 
-        // If email confirmation is disabled or auto-confirmed
+        // If email confirmation is disabled or session was created immediately
         if (data.session && data.user) {
-          hideLoginModal(
-            elements.modal,
-            elements.form,
-            elements.errorContainer,
-            elements.successContainer
-          );
           if (callbacks.onLogin) {
-            callbacks.onLogin(data.user);
+            await callbacks.onLogin(data.user);
           }
         } else {
-          // Confirmation required
+          // Confirmation email sent
           if (elements.successContainer) {
             elements.successContainer.textContent =
-              'Account created! Please check your email to confirm, then sign in.';
+              'Registration successful! Please check your email to confirm your account, then sign in.';
             elements.successContainer.classList.add('visible');
           }
           setAuthMode('signin');
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Authentication failed. Please try again.';
+      const msg =
+        err instanceof Error ? err.message : 'Authentication failed. Please try again.';
       elements.errorContainer.textContent = msg;
       elements.errorContainer.classList.add('visible');
     } finally {
-      if (submitBtn) submitBtn.disabled = false;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = currentMode === 'signin' ? 'Sign In' : 'Create Account';
+      }
     }
   };
   elements.form.addEventListener('submit', handleFormSubmit);
 
-  // Return unbind cleanup
   return () => {
     elements.tabSignIn?.removeEventListener('click', handleTabSignIn);
     elements.tabSignUp?.removeEventListener('click', handleTabSignUp);
-    elements.authButton.removeEventListener('click', handleAuthButtonClick);
-    if (elements.cancelButton) {
-      elements.cancelButton.removeEventListener('click', handleCancelClick);
-    }
-    elements.modal.removeEventListener('click', handleBackdropClick);
+    elements.authButton?.removeEventListener('click', handleAuthButtonClick);
     elements.form.removeEventListener('submit', handleFormSubmit);
     authListener.subscription.unsubscribe();
   };

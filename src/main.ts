@@ -34,7 +34,12 @@ import type { User } from '@supabase/supabase-js';
 import { supabase, getUserRole, type Project } from './api/supabase';
 import { loadMarks, saveMark, deleteMark, clearAllMarks, subscribeToMarks } from './api/marks';
 import { loadProjects, populateProjectSelect } from './api/projects';
-import { initAuth } from './ui/auth';
+import {
+  initAuth,
+  showAppScreen,
+  showAuthScreen,
+  showDisabledScreen,
+} from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
@@ -78,14 +83,16 @@ const authBtn = document.querySelector<HTMLElement>('#auth-btn');
 const roleBadge = document.querySelector<HTMLElement>('#role-badge');
 const statusHint = document.querySelector<HTMLElement>('#status-hint');
 
-const authModal = document.querySelector<HTMLElement>('#auth-modal');
+const authScreen = document.querySelector<HTMLElement>('#auth-screen')!;
+const appRoot = document.querySelector<HTMLElement>('#app-root')!;
+const disabledScreen = document.querySelector<HTMLElement>('#disabled-screen');
+const disabledSignoutBtn = document.querySelector<HTMLElement>('#disabled-signout-btn');
+
 const authForm = document.querySelector<HTMLFormElement>('#auth-form');
 const authEmail = document.querySelector<HTMLInputElement>('#auth-email');
 const authPassword = document.querySelector<HTMLInputElement>('#auth-password');
 const authError = document.querySelector<HTMLElement>('#auth-error');
 const authSuccess = document.querySelector<HTMLElement>('#auth-success');
-const authCancel = document.querySelector<HTMLElement>('#auth-cancel');
-const authTitle = document.querySelector<HTMLElement>('#auth-title');
 const authSubtitle = document.querySelector<HTMLElement>('#auth-subtitle');
 const tabSignIn = document.querySelector<HTMLElement>('#tab-signin');
 const tabSignUp = document.querySelector<HTMLElement>('#tab-signup');
@@ -828,36 +835,58 @@ async function initProjectList(): Promise<void> {
   }
 }
 
-// Initialize Auth UI
-if (authModal && authForm && authEmail && authPassword && authError && authBtn) {
+// Initialize Authentication Gate & Route Guard
+if (authScreen && appRoot && authForm && authEmail && authPassword && authError) {
   initAuth(
     {
-      modal: authModal,
+      authScreen,
+      appRoot,
+      disabledScreen,
+      disabledSignOutButton: disabledSignoutBtn,
       form: authForm,
       emailInput: authEmail,
       passwordInput: authPassword,
       errorContainer: authError,
       successContainer: authSuccess,
       authButton: authBtn,
-      cancelButton: authCancel,
       tabSignIn,
       tabSignUp,
-      title: authTitle,
       subtitle: authSubtitle,
       submitButton: authSubmitBtn,
     },
     {
       onLogin: async (user) => {
-        currentUser = user;
         const role = await getUserRole(user.id);
+
+        if (role === 'disabled') {
+          currentUser = null;
+          showDisabledScreen({ authScreen, appRoot, disabledScreen });
+          return;
+        }
+
+        currentUser = user;
+        showAppScreen({ authScreen, appRoot, disabledScreen });
         applyUserRole(role);
-        const roleLabel = role === 'admin' ? 'Administrator' : role === 'editor' ? 'Editor' : 'Viewer';
+        const roleLabel =
+          role === 'admin' ? 'Administrator' : role === 'editor' ? 'Editor' : 'Viewer';
         showToast(toastElement, `Signed in as ${user.email} (${roleLabel})`);
+
+        // Load projects and marks ONLY after user is verified
         await initProjectList();
       },
       onSignOut: () => {
         currentUser = null;
-        applyUserRole('viewer');
+        currentUserRole = 'viewer';
+        showAuthScreen({ authScreen, appRoot, disabledScreen });
+
+        // Unsubscribe from real-time and clear map canvas memory
+        if (marksSubscriptionCleanup) {
+          marksSubscriptionCleanup();
+          marksSubscriptionCleanup = null;
+        }
+        marks = [];
+        history = [];
+        renderAll();
         showToast(toastElement, 'Signed out');
       },
     }
@@ -873,8 +902,3 @@ navUsersBtn?.addEventListener('click', async () => {
   await switchToUsers();
 });
 
-// Default to Viewer View initially
-applyUserRole('viewer');
-
-// Initial project / map load
-initProjectList();

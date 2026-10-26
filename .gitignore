@@ -39,3 +39,6 @@ pnpm-debug.log*
 # Internal planning documents
 Build Plan.md
 build_steps.md
+
+# env
+.env

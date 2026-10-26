@@ -1,30 +1,41 @@
-:root {
-  --bg: #eef0ec;
-  --sf: #fff;
-  --tx: #1b2220;
-  --mu: #5f6b66;
-  --bd: #cfd5d0;
+:root,
+:root[data-theme="light"] {
+  --bg: #f3f6f4;
+  --sf: #ffffff;
+  --tx: #132219;
+  --mu: #556c60;
+  --bd: #d0ded6;
+  --brand-green: #15803d;
+  --brand-green-hover: #166534;
+  --brand-green-subtle: rgba(21, 128, 61, 0.1);
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #141918;
-    --sf: #1d2422;
-    --tx: #e8eeeb;
-    --mu: #93a19b;
-    --bd: #33403b;
-  }
+:root[data-theme="dark-green"],
+:root[data-theme="dark"] {
+  --bg: #09140f;
+  --sf: #11221a;
+  --tx: #e7f5ee;
+  --mu: #82a392;
+  --bd: #1d382b;
+  --brand-green: #10b981;
+  --brand-green-hover: #34d399;
+  --brand-green-subtle: rgba(16, 185, 129, 0.15);
 }
 
-:root[data-theme="dark"] {
-  --bg: #141918;
-  --sf: #1d2422;
-  --tx: #e8eeeb;
-  --mu: #93a19b;
-  --bd: #33403b;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark-green"]) {
+    --bg: #09140f;
+    --sf: #11221a;
+    --tx: #e7f5ee;
+    --mu: #82a392;
+    --bd: #1d382b;
+    --brand-green: #10b981;
+    --brand-green-hover: #34d399;
+    --brand-green-subtle: rgba(16, 185, 129, 0.15);
+  }
 }
 
 html,
@@ -210,6 +221,13 @@ button.on {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+#stage.is-panning {
+  cursor: grabbing !important;
 }
 
 #box {
@@ -219,6 +237,7 @@ button.on {
   cursor: crosshair;
   background: #fff;
   box-shadow: 0 1px 8px #0003;
+  transform-origin: 0 0;
 }
 
 #box canvas {
@@ -333,8 +352,14 @@ body.role-viewer #cl {
   display: none !important;
 }
 
+body.role-viewer #stage,
 body.role-viewer #box {
-  cursor: default !important;
+  cursor: grab !important;
+}
+
+body.role-viewer #stage.is-panning,
+body.role-viewer #stage.is-panning #box {
+  cursor: grabbing !important;
 }
 
 body.role-viewer .chip {
@@ -344,6 +369,43 @@ body.role-viewer .chip {
 body.role-viewer .chip input[type="color"] {
   pointer-events: none;
   opacity: 0.8;
+}
+
+/* Theme Toggle Button */
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: var(--sf);
+  color: var(--tx);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.theme-toggle-btn:hover {
+  border-color: var(--brand-green);
+  color: var(--brand-green);
+  box-shadow: 0 0 0 2px var(--brand-green-subtle);
+}
+
+.theme-toggle-btn.is-dark-green {
+  border-color: var(--brand-green);
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+}
+
+.auth-theme-bar {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  z-index: 10;
 }
 
 /* Landing Auth Page & Route Guard */

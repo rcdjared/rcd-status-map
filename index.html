@@ -12,6 +12,12 @@
 <body>
   <!-- Landing / Auth Screen (Displayed by default when not signed in) -->
   <div id="auth-screen" class="auth-page">
+    <div class="auth-theme-bar">
+      <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
+        <span class="theme-btn-icon">☀️</span>
+        <span class="theme-btn-text">Light</span>
+      </button>
+    </div>
     <div class="auth-card">
       <div class="auth-card-header">
         <img src="/src/assets/logo.png" alt="RCD Logo" class="auth-logo" />
@@ -87,6 +93,10 @@
         </nav>
 
         <div class="user-profile-bar">
+          <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
+            <span class="theme-btn-icon">☀️</span>
+            <span class="theme-btn-text">Light</span>
+          </button>
           <div id="user-info-capsule" class="user-capsule" style="display: none;">
             <span class="user-dot"></span>
             <span id="user-email-display" class="user-email-text"></span>

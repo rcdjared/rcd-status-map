@@ -127,13 +127,43 @@ export function screenToMapCoords(
 }
 
 /**
- * Creates pan/drag state on mouse down.
+ * Smoothly zooms the map towards a specific viewport coordinate point (e.g. mouse cursor position),
+ * maintaining the point under the cursor unchanged.
+ */
+export function zoomAtPoint(
+  factor: number,
+  cursorX: number,
+  cursorY: number,
+  currentZoom: number,
+  stageElement: HTMLElement,
+  boxElement: HTMLElement,
+  mapWidth: number
+): number {
+  const stageRect = stageElement.getBoundingClientRect();
+  const relX = cursorX - stageRect.left;
+  const relY = cursorY - stageRect.top;
+
+  const worldX = (stageElement.scrollLeft + relX) / currentZoom;
+  const worldY = (stageElement.scrollTop + relY) / currentZoom;
+
+  const newZoom = calculateZoom(currentZoom, factor, stageElement.clientWidth, mapWidth);
+  if (Math.abs(newZoom - currentZoom) < 0.0001) return currentZoom;
+
+  applyZoom(boxElement, mapWidth, newZoom);
+
+  stageElement.scrollLeft = worldX * newZoom - relX;
+  stageElement.scrollTop = worldY * newZoom - relY;
+
+  return newZoom;
+}
+
+/**
+ * Creates pan/drag state on mouse or touch down.
  */
 export function createPanState(
   e: PointerEvent,
   stageElement: HTMLElement
 ): PanDragState | null {
-  if (e.pointerType !== 'mouse') return null;
   return {
     startX: e.clientX,
     startY: e.clientY,
@@ -145,7 +175,7 @@ export function createPanState(
 
 /**
  * Updates stage scroll positions during a pan drag.
- * Returns true if the pointer has moved beyond the 5px threshold.
+ * Returns true if the pointer has moved beyond the threshold.
  */
 export function handlePanMove(
   state: PanDragState,
@@ -155,7 +185,7 @@ export function handlePanMove(
   const dx = e.clientX - state.startX;
   const dy = e.clientY - state.startY;
 
-  if (Math.abs(dx) + Math.abs(dy) > 5) {
+  if (Math.abs(dx) + Math.abs(dy) > 4) {
     state.moved = true;
   }
 

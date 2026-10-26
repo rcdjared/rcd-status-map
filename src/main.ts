@@ -15,6 +15,7 @@ import {
   screenToMapCoords,
   createPanState,
   handlePanMove,
+  zoomAtPoint,
   compositeForExport,
   type CanvasGroup,
   type PanDragState,
@@ -43,6 +44,7 @@ import {
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
+import { initTheme } from './ui/theme';
 import {
   initActionButtons,
   initKeyboardShortcuts,
@@ -346,8 +348,18 @@ function renderAll(): void {
 
 function setZoom(factor: number): void {
   if (!mapWidth) return;
-  currentZoom = calculateZoom(currentZoom, factor, stage.clientWidth, mapWidth);
-  applyZoom(box, mapWidth, currentZoom);
+  if (!factor) {
+    // Fit to viewport
+    currentZoom = calculateZoom(currentZoom, 0, stage.clientWidth, mapWidth);
+    applyZoom(box, mapWidth, currentZoom);
+    stage.scrollLeft = 0;
+    stage.scrollTop = 0;
+    return;
+  }
+  const rect = stage.getBoundingClientRect();
+  const centerX = rect.left + stage.clientWidth / 2;
+  const centerY = rect.top + stage.clientHeight / 2;
+  currentZoom = zoomAtPoint(factor, centerX, centerY, currentZoom, stage, box, mapWidth);
 }
 
 async function undo(): Promise<void> {
@@ -674,6 +686,7 @@ box.addEventListener('click', async (e: MouseEvent) => {
 stage.addEventListener('pointerdown', (e: PointerEvent) => {
   pointerMoved = false;
   panState = createPanState(e, stage);
+  stage.classList.add('is-panning');
 });
 
 window.addEventListener('pointermove', (e: PointerEvent) => {
@@ -686,7 +699,69 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
 
 window.addEventListener('pointerup', () => {
   panState = null;
+  stage.classList.remove('is-panning');
 });
+
+// Suppress context menu if the user was right-click dragging
+stage.addEventListener('contextmenu', (e: MouseEvent) => {
+  if (pointerMoved) {
+    e.preventDefault();
+  }
+});
+
+// Smooth Mouse Wheel Zoom (zooms towards cursor position)
+stage.addEventListener(
+  'wheel',
+  (e: WheelEvent) => {
+    e.preventDefault();
+    if (!mapWidth) return;
+
+    // Normalizing wheel delta: scroll up zooms in, scroll down zooms out
+    const factor = e.deltaY < 0 ? 1.15 : 0.87;
+    currentZoom = zoomAtPoint(factor, e.clientX, e.clientY, currentZoom, stage, box, mapWidth);
+  },
+  { passive: false }
+);
+
+// Mobile & Tablet Touch Pinch-to-Zoom
+let touchPinchDist = 0;
+stage.addEventListener(
+  'touchstart',
+  (e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      touchPinchDist = Math.hypot(dx, dy);
+    }
+  },
+  { passive: true }
+);
+
+stage.addEventListener(
+  'touchmove',
+  (e: TouchEvent) => {
+    if (e.touches.length === 2 && touchPinchDist > 0 && mapWidth) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const factor = dist / touchPinchDist;
+      touchPinchDist = dist;
+
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      currentZoom = zoomAtPoint(factor, midX, midY, currentZoom, stage, box, mapWidth);
+    }
+  },
+  { passive: true }
+);
+
+stage.addEventListener(
+  'touchend',
+  () => {
+    touchPinchDist = 0;
+  },
+  { passive: true }
+);
 
 // UI Toolbar & Mode buttons
 initModeButtons(
@@ -790,6 +865,9 @@ initKeyboardShortcuts({
     }
   },
 });
+
+// 5. Initialize Theme (Light and Dark Green Modes)
+initTheme();
 
 // 6. Initialize App
 try {

@@ -4,10 +4,38 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>temp-app</title>
+    <title>RCD Status Map</title>
   </head>
   <body>
-    <div id="app"></div>
+    <header>
+      <h1>RCD Status Map</h1>
+      <select id="mp"></select>
+      <div class="g" id="chips"></div>
+      <div class="g">
+        <button data-m="fill" class="on">Paint lot</button>
+        <button data-m="pin">Pin</button>
+        <button data-m="erase">Erase</button>
+        <button data-m="lg">Move legend</button>
+      </div>
+      <div class="g">
+        <button id="un">Undo</button>
+        <button id="cl">Clear all</button>
+        <button id="zo">−</button>
+        <button id="zi">+</button>
+        <button id="zf">Fit</button>
+        <button id="png">Save PNG</button>
+      </div>
+      <small>Click a lot to paint it · drag to pan · keys 1 2 3 = status</small>
+    </header>
+    <main id="stage">
+      <div id="box">
+        <canvas id="base"></canvas>
+        <canvas id="fill"></canvas>
+        <canvas id="pins"></canvas>
+        <div id="ld">Loading map…</div>
+      </div>
+    </main>
+    <div id="t"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

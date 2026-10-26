@@ -184,11 +184,70 @@ select {
   padding: 6px 8px;
 }
 
+/* Brand & Role Badge */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.badge-viewer {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.badge-admin {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+/* Role-based UI visibility */
+body.role-viewer #edit-tools {
+  display: none !important;
+}
+
+body.role-viewer #un,
+body.role-viewer #cl {
+  display: none !important;
+}
+
+body.role-viewer #box {
+  cursor: default !important;
+}
+
+body.role-viewer .chip {
+  cursor: default;
+}
+
+body.role-viewer .chip input[type="color"] {
+  pointer-events: none;
+  opacity: 0.8;
+}
+
 /* Auth Modal */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -207,20 +266,70 @@ select {
   background: var(--sf);
   color: var(--tx);
   border: 1px solid var(--bd);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 24px;
   width: 100%;
-  max-width: 340px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  max-width: 380px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.3);
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+.modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.modal-logo {
+  max-height: 48px;
+  max-width: 180px;
+  width: auto;
+  object-fit: contain;
+  margin-bottom: 4px;
+}
+
 .modal-content h2 {
   margin: 0;
   font-size: 18px;
+  font-weight: 650;
+}
+
+.modal-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--mu);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 8px;
+  background: var(--bg);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 6px 10px;
   font-weight: 600;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--mu);
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.auth-tab.on {
+  background: var(--sf);
+  color: var(--tx);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .modal-form {
@@ -235,8 +344,9 @@ select {
   background: var(--bg);
   border: 1px solid var(--bd);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   outline: none;
+  transition: border-color 0.15s ease;
 }
 
 .modal-form input:focus {
@@ -247,15 +357,33 @@ select {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .auth-error {
   color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
   font-size: 13px;
   display: none;
 }
 
 .auth-error.visible {
+  display: block;
+}
+
+.auth-success {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  display: none;
+}
+
+.auth-success.visible {
   display: block;
 }

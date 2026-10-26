@@ -31,8 +31,8 @@ import {
 
 // 4. API & UI functions
 import type { User } from '@supabase/supabase-js';
-import { supabase, type Project } from './api/supabase';
-import { loadMarks, saveMark, deleteMark, clearAllMarks } from './api/marks';
+import { supabase, getUserRole, type Project } from './api/supabase';
+import { loadMarks, saveMark, deleteMark, clearAllMarks, subscribeToMarks } from './api/marks';
 import { loadProjects, populateProjectSelect } from './api/projects';
 import { initAuth } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
@@ -66,13 +66,21 @@ const zoomInBtn = document.querySelector<HTMLElement>('#zi');
 const zoomFitBtn = document.querySelector<HTMLElement>('#zf');
 const savePngBtn = document.querySelector<HTMLElement>('#png');
 const authBtn = document.querySelector<HTMLElement>('#auth-btn');
+const roleBadge = document.querySelector<HTMLElement>('#role-badge');
+const statusHint = document.querySelector<HTMLElement>('#status-hint');
 
 const authModal = document.querySelector<HTMLElement>('#auth-modal');
 const authForm = document.querySelector<HTMLFormElement>('#auth-form');
 const authEmail = document.querySelector<HTMLInputElement>('#auth-email');
 const authPassword = document.querySelector<HTMLInputElement>('#auth-password');
 const authError = document.querySelector<HTMLElement>('#auth-error');
+const authSuccess = document.querySelector<HTMLElement>('#auth-success');
 const authCancel = document.querySelector<HTMLElement>('#auth-cancel');
+const authTitle = document.querySelector<HTMLElement>('#auth-title');
+const authSubtitle = document.querySelector<HTMLElement>('#auth-subtitle');
+const tabSignIn = document.querySelector<HTMLElement>('#tab-signin');
+const tabSignUp = document.querySelector<HTMLElement>('#tab-signup');
+const authSubmitBtn = document.querySelector<HTMLButtonElement>('#auth-submit-btn');
 
 // State
 const COLOR_STORAGE_KEY = 'rrh-colors-v1';
@@ -83,7 +91,9 @@ const statuses: StatusMap = {
 };
 
 let currentUser: User | null = null;
+let currentUserRole: 'admin' | 'editor' | 'viewer' = 'viewer';
 let currentProjectId: string | null = null;
+let marksSubscriptionCleanup: (() => void) | null = null;
 
 let currentMapIndex = 0;
 let mapToken = 0;
@@ -126,6 +136,108 @@ function snapshot(): void {
   if (history.length > 100) {
     history.shift();
   }
+}
+
+function applyUserRole(role: 'admin' | 'editor' | 'viewer'): void {
+  currentUserRole = role;
+  const isAdmin = role === 'admin' || role === 'editor';
+
+  if (isAdmin) {
+    document.body.classList.remove('role-viewer');
+    document.body.classList.add('role-admin');
+    if (roleBadge) {
+      roleBadge.textContent = 'Admin Mode';
+      roleBadge.className = 'badge badge-admin';
+    }
+    if (statusHint) {
+      statusHint.textContent = 'Admin Mode: Click a lot to paint · drag to pan · keys 1 2 3 = status';
+    }
+  } else {
+    document.body.classList.add('role-viewer');
+    document.body.classList.remove('role-admin');
+    if (roleBadge) {
+      roleBadge.textContent = 'Viewer View';
+      roleBadge.className = 'badge badge-viewer';
+    }
+    if (statusHint) {
+      statusHint.textContent = 'Viewer View: Live lot updates · drag to pan';
+    }
+  }
+}
+
+function setupRealtimeForCurrentProject(projectId: string): void {
+  if (marksSubscriptionCleanup) {
+    marksSubscriptionCleanup();
+    marksSubscriptionCleanup = null;
+  }
+
+  marksSubscriptionCleanup = subscribeToMarks(projectId, (change) => {
+    if (!mapWidth || !mapHeight || !barrierMap) return;
+
+    if (change.eventType === 'INSERT') {
+      const row = change.newRecord;
+      if (!row || marks.some((m) => m.id === row.id)) return;
+
+      const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+      const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+      const m: Mark = {
+        id: row.id,
+        t: row.kind === 'pin' ? 'p' : 'f',
+        x: px,
+        y: py,
+        s: row.status,
+      };
+
+      if (m.t === 'f') {
+        const spans = region(px, py, mapWidth, mapHeight, barrierMap);
+        if (spans) m.sp = spans;
+      }
+
+      if (m.t === 'p' || m.sp) {
+        marks.push(m);
+        renderAll();
+        saveState();
+      }
+    } else if (change.eventType === 'DELETE') {
+      const oldId = change.oldRecord?.id;
+      if (oldId) {
+        const initialCount = marks.length;
+        marks = marks.filter((m) => m.id !== oldId);
+        if (marks.length !== initialCount) {
+          renderAll();
+          saveState();
+        }
+      }
+    } else if (change.eventType === 'UPDATE') {
+      const row = change.newRecord;
+      if (!row) return;
+
+      const existingIndex = marks.findIndex((m) => m.id === row.id);
+      const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+      const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+
+      const updatedMark: Mark = {
+        id: row.id,
+        t: row.kind === 'pin' ? 'p' : 'f',
+        x: px,
+        y: py,
+        s: row.status,
+      };
+
+      if (updatedMark.t === 'f') {
+        const spans = region(px, py, mapWidth, mapHeight, barrierMap);
+        if (spans) updatedMark.sp = spans;
+      }
+
+      if (existingIndex >= 0) {
+        marks[existingIndex] = updatedMark;
+      } else {
+        marks.push(updatedMark);
+      }
+      renderAll();
+      saveState();
+    }
+  });
 }
 
 function renderAll(): void {
@@ -265,6 +377,9 @@ async function openMap(index: number): Promise<void> {
         // Keep local storage synchronized with latest Supabase state
         saveState();
       }
+
+      // Connect realtime updates
+      setupRealtimeForCurrentProject(currentProjectId);
     }
 
     // 3. Fallback to localStorage if not loaded from Supabase (or user is offline/unauthenticated)
@@ -351,6 +466,10 @@ async function openProject(proj: Project): Promise<void> {
         .filter((m) => m.t === 'p' || m.sp);
 
       saveState();
+    }
+
+    if (currentProjectId) {
+      setupRealtimeForCurrentProject(currentProjectId);
     } else {
       // Fallback to local storage if empty or offline
       try {
@@ -391,6 +510,12 @@ async function openProject(proj: Project): Promise<void> {
 // Canvas click for painting, erasing, pinning, moving legend
 box.addEventListener('click', async (e: MouseEvent) => {
   if (pointerMoved || !barrierMap || !mapWidth || !mapHeight) return;
+
+  // Viewers cannot paint, erase, pin, or move legend
+  if (currentUserRole !== 'admin' && currentUserRole !== 'editor') {
+    showToast(toastElement, 'Viewer View: Editing is restricted to administrators.');
+    return;
+  }
 
   const { x, y } = screenToMapCoords(e.clientX, e.clientY, box, mapWidth, mapHeight);
 
@@ -497,9 +622,14 @@ initActionButtons(
   },
   {
     onUndo: () => {
-      undo();
+      if (currentUserRole === 'admin' || currentUserRole === 'editor') {
+        undo();
+      }
     },
     onClear: async () => {
+      if (currentUserRole !== 'admin' && currentUserRole !== 'editor') {
+        return;
+      }
       if (marks.length > 0) {
         snapshot();
 
@@ -535,7 +665,7 @@ initActionButtons(
               };
             }
           ).claude;
-          const downloads = claude && (await claude.use('downloads'));
+          downloads = claude && (await claude.use('downloads'));
           if (downloads) {
             await downloads.save({ filename, data: blob });
             return;
@@ -558,14 +688,20 @@ initActionButtons(
 const statusKeys = ['c', 'o', 'a'];
 initKeyboardShortcuts({
   onUndo: () => {
-    undo();
+    if (currentUserRole === 'admin' || currentUserRole === 'editor') {
+      undo();
+    }
   },
   onSelectStatusIndex: (index) => {
-    if (statusKeys[index]) {
+    if ((currentUserRole === 'admin' || currentUserRole === 'editor') && statusKeys[index]) {
       setStatus(statusKeys[index]);
     }
   },
-  onSetMode: (mode) => setMode(mode),
+  onSetMode: (mode) => {
+    if (currentUserRole === 'admin' || currentUserRole === 'editor') {
+      setMode(mode);
+    }
+  },
 });
 
 // 6. Initialize App
@@ -621,22 +757,35 @@ if (authModal && authForm && authEmail && authPassword && authError && authBtn) 
       emailInput: authEmail,
       passwordInput: authPassword,
       errorContainer: authError,
+      successContainer: authSuccess,
       authButton: authBtn,
       cancelButton: authCancel,
+      tabSignIn,
+      tabSignUp,
+      title: authTitle,
+      subtitle: authSubtitle,
+      submitButton: authSubmitBtn,
     },
     {
       onLogin: async (user) => {
         currentUser = user;
-        showToast(toastElement, `Signed in as ${user.email}`);
+        const role = await getUserRole(user.id);
+        applyUserRole(role);
+        const roleLabel = role === 'admin' ? 'Administrator' : role === 'editor' ? 'Editor' : 'Viewer';
+        showToast(toastElement, `Signed in as ${user.email} (${roleLabel})`);
         await initProjectList();
       },
       onSignOut: () => {
         currentUser = null;
+        applyUserRole('viewer');
         showToast(toastElement, 'Signed out');
       },
     }
   );
 }
+
+// Default to Viewer View initially
+applyUserRole('viewer');
 
 // Initial project / map load
 initProjectList();

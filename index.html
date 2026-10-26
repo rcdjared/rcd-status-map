@@ -8,16 +8,20 @@
   </head>
   <body>
     <header>
-      <h1>RCD Status Map</h1>
+      <div class="brand">
+        <img src="/src/assets/logo.png" alt="RCD Logo" class="brand-logo" />
+        <h1>RCD Status Map</h1>
+        <span id="role-badge" class="badge badge-viewer">Viewer View</span>
+      </div>
       <select id="mp"></select>
       <div class="g" id="chips"></div>
-      <div class="g">
+      <div class="g" id="edit-tools">
         <button data-m="fill" class="on">Paint lot</button>
         <button data-m="pin">Pin</button>
         <button data-m="erase">Erase</button>
         <button data-m="lg">Move legend</button>
       </div>
-      <div class="g">
+      <div class="g" id="action-tools">
         <button id="un">Undo</button>
         <button id="cl">Clear all</button>
         <button id="zo">−</button>
@@ -26,7 +30,7 @@
         <button id="png">Save PNG</button>
         <button id="auth-btn">Sign In</button>
       </div>
-      <small>Click a lot to paint it · drag to pan · keys 1 2 3 = status</small>
+      <small id="status-hint">Viewer View: Live lot updates · drag to pan</small>
     </header>
     <main id="stage">
       <div id="box">
@@ -41,14 +45,26 @@
     <!-- Auth Modal -->
     <div id="auth-modal" class="modal-overlay" role="dialog" aria-modal="true">
       <div class="modal-content">
-        <h2>Sign In</h2>
+        <div class="modal-header">
+          <img src="/src/assets/logo.png" alt="RCD Logo" class="modal-logo" />
+          <h2 id="auth-title">Sign In</h2>
+          <p id="auth-subtitle" class="modal-sub">Sign in to access your account or editor tools</p>
+        </div>
+
+        <div class="auth-tabs">
+          <button type="button" id="tab-signin" class="auth-tab on">Sign In</button>
+          <button type="button" id="tab-signup" class="auth-tab">Sign Up</button>
+        </div>
+
         <div id="auth-error" class="auth-error"></div>
+        <div id="auth-success" class="auth-success"></div>
+
         <form id="auth-form" class="modal-form">
-          <input type="email" id="auth-email" placeholder="Email" required autocomplete="email" />
-          <input type="password" id="auth-password" placeholder="Password" required autocomplete="current-password" />
+          <input type="email" id="auth-email" placeholder="Email address" required autocomplete="email" />
+          <input type="password" id="auth-password" placeholder="Password (min 6 characters)" required autocomplete="current-password" minlength="6" />
           <div class="modal-actions">
-            <button type="button" id="auth-cancel">Cancel</button>
-            <button type="submit" class="on">Sign In</button>
+            <button type="button" id="auth-cancel">Browse as Guest</button>
+            <button type="submit" id="auth-submit-btn" class="on">Sign In</button>
           </div>
         </form>
       </div>

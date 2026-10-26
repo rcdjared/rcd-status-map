@@ -121,3 +121,42 @@ export async function clearAllMarks(
     };
   }
 }
+
+export interface RealtimeMarkChange {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  newRecord: MarkRow | null;
+  oldRecord: { id: string } | null;
+}
+
+/**
+ * Subscribes to realtime Postgres changes for marks belonging to a specific project.
+ * Returns an unsubscribe callback.
+ */
+export function subscribeToMarks(
+  projectId: string,
+  onChange: (change: RealtimeMarkChange) => void
+): () => void {
+  const channel = supabase
+    .channel(`marks:${projectId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'marks',
+        filter: `project_id=eq.${projectId}`,
+      },
+      (payload) => {
+        onChange({
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+          newRecord: (payload.new as MarkRow) || null,
+          oldRecord: (payload.old as { id: string }) || null,
+        });
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

@@ -156,3 +156,26 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+/**
+ * Fetches the user's role from the public.profiles table.
+ * Defaults to 'viewer' if not found or on error.
+ */
+export async function getUserRole(
+  userId: string
+): Promise<'admin' | 'editor' | 'viewer'> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return 'viewer';
+    }
+    return (data.role as 'admin' | 'editor' | 'viewer') || 'viewer';
+  } catch {
+    return 'viewer';
+  }
+}

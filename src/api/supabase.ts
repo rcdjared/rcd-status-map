@@ -163,7 +163,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
  */
 export async function getUserRole(
   userId: string
-): Promise<'admin' | 'editor' | 'viewer'> {
+): Promise<'admin' | 'editor' | 'viewer' | 'disabled'> {
   try {
     const { data, error } = await supabase
       .from('profiles')
@@ -174,7 +174,7 @@ export async function getUserRole(
     if (error || !data) {
       return 'viewer';
     }
-    return (data.role as 'admin' | 'editor' | 'viewer') || 'viewer';
+    return (data.role as 'admin' | 'editor' | 'viewer' | 'disabled') || 'viewer';
   } catch {
     return 'viewer';
   }

@@ -37,6 +37,7 @@ import { loadProjects, populateProjectSelect } from './api/projects';
 import { initAuth } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
+import { initUsersManagement } from './ui/users';
 import {
   initActionButtons,
   initKeyboardShortcuts,
@@ -57,6 +58,14 @@ const chipsContainer = document.querySelector<HTMLElement>('#chips')!;
 const mapSelect = document.querySelector<HTMLSelectElement>('#mp')!;
 const loadingIndicator = document.querySelector<HTMLElement>('#ld')!;
 const toastElement = document.querySelector<HTMLElement>('#t')!;
+
+// Navigation & User Management Elements
+const navMapBtn = document.querySelector<HTMLElement>('#nav-map-btn');
+const navUsersBtn = document.querySelector<HTMLElement>('#nav-users-btn');
+const usersView = document.querySelector<HTMLElement>('#users-view');
+const userInfoCapsule = document.querySelector<HTMLElement>('#user-info-capsule');
+const userEmailDisplay = document.querySelector<HTMLElement>('#user-email-display');
+const headerControls = document.querySelector<HTMLElement>('#header-controls');
 
 const modeButtons = Array.from(document.querySelectorAll<HTMLElement>('button[data-m]'));
 const undoBtn = document.querySelector<HTMLElement>('#un');
@@ -91,9 +100,10 @@ const statuses: StatusMap = {
 };
 
 let currentUser: User | null = null;
-let currentUserRole: 'admin' | 'editor' | 'viewer' = 'viewer';
+let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
 let currentProjectId: string | null = null;
 let marksSubscriptionCleanup: (() => void) | null = null;
+let usersManager: ReturnType<typeof initUsersManagement> | null = null;
 
 let currentMapIndex = 0;
 let mapToken = 0;
@@ -111,6 +121,41 @@ let currentZoom = 1;
 
 let panState: PanDragState | null = null;
 let pointerMoved = false;
+
+// Navigation view switching
+function switchToMap(): void {
+  if (navMapBtn) navMapBtn.classList.add('on');
+  if (navUsersBtn) navUsersBtn.classList.remove('on');
+  if (stage) stage.style.display = 'block';
+  if (headerControls) headerControls.style.display = 'flex';
+  if (statusHint) statusHint.style.display = 'block';
+  if (usersView) usersView.style.display = 'none';
+}
+
+async function switchToUsers(): Promise<void> {
+  if (currentUserRole !== 'admin') {
+    showToast(toastElement, 'Access denied: Administrator permissions required');
+    return;
+  }
+  if (navUsersBtn) navUsersBtn.classList.add('on');
+  if (navMapBtn) navMapBtn.classList.remove('on');
+  if (stage) stage.style.display = 'none';
+  if (headerControls) headerControls.style.display = 'none';
+  if (statusHint) statusHint.style.display = 'none';
+  if (usersView) {
+    usersView.style.display = 'block';
+    if (!usersManager && currentUser) {
+      usersManager = initUsersManagement({
+        container: usersView,
+        toastElement,
+        currentUserId: currentUser.id,
+      });
+    }
+    if (usersManager) {
+      await usersManager.load();
+    }
+  }
+}
 
 // Helpers
 function getStorageKey(): string {
@@ -138,30 +183,65 @@ function snapshot(): void {
   }
 }
 
-function applyUserRole(role: 'admin' | 'editor' | 'viewer'): void {
+function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   currentUserRole = role;
-  const isAdmin = role === 'admin' || role === 'editor';
+  const isAdmin = role === 'admin';
+  const isEditor = role === 'editor';
+  const canEdit = isAdmin || isEditor;
 
-  if (isAdmin) {
+  if (canEdit) {
     document.body.classList.remove('role-viewer');
     document.body.classList.add('role-admin');
-    if (roleBadge) {
-      roleBadge.textContent = 'Admin Mode';
-      roleBadge.className = 'badge badge-admin';
-    }
-    if (statusHint) {
-      statusHint.textContent = 'Admin Mode: Click a lot to paint · drag to pan · keys 1 2 3 = status';
-    }
   } else {
     document.body.classList.add('role-viewer');
     document.body.classList.remove('role-admin');
-    if (roleBadge) {
+  }
+
+  if (roleBadge) {
+    if (role === 'admin') {
+      roleBadge.textContent = 'Admin Mode';
+      roleBadge.className = 'badge badge-admin';
+    } else if (role === 'editor') {
+      roleBadge.textContent = 'Editor Mode';
+      roleBadge.className = 'badge badge-editor';
+    } else if (role === 'disabled') {
+      roleBadge.textContent = 'Account Disabled';
+      roleBadge.className = 'badge badge-disabled';
+    } else {
       roleBadge.textContent = 'Viewer View';
       roleBadge.className = 'badge badge-viewer';
     }
-    if (statusHint) {
+  }
+
+  if (statusHint) {
+    if (role === 'admin') {
+      statusHint.textContent = 'Admin Mode: Click a lot to paint · drag to pan · manage team in Users tab';
+    } else if (role === 'editor') {
+      statusHint.textContent = 'Editor Mode: Click a lot to paint · drag to pan · keys 1 2 3 = status';
+    } else if (role === 'disabled') {
+      statusHint.textContent = 'Your account has been disabled. Please contact an administrator.';
+    } else {
       statusHint.textContent = 'Viewer View: Live lot updates · drag to pan';
     }
+  }
+
+  // Show Users management tab only for Admin
+  if (navUsersBtn) {
+    navUsersBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+  }
+
+  // If user was viewing users panel and got demoted, redirect back to map
+  if (!isAdmin && usersView && usersView.style.display !== 'none') {
+    switchToMap();
+  }
+
+  // Update user capsule
+  if (currentUser) {
+    if (userInfoCapsule) userInfoCapsule.style.display = 'inline-flex';
+    if (userEmailDisplay) userEmailDisplay.textContent = currentUser.email || 'Signed In';
+  } else {
+    if (userInfoCapsule) userInfoCapsule.style.display = 'none';
+    if (userEmailDisplay) userEmailDisplay.textContent = '';
   }
 }
 

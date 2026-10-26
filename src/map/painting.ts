@@ -102,7 +102,8 @@ export function drawMarks(
   pinsCtx.clearRect(0, 0, width, height);
 
   for (const m of marks) {
-    if (counts[m.s] !== undefined) {
+    // Only paint/fill ('f') counts toward the status total; pins ('p') are visual only
+    if (m.t === 'f' && counts[m.s] !== undefined) {
       counts[m.s]++;
     }
     const color = statuses[m.s]?.c || '#000';

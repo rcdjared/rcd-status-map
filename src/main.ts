@@ -29,6 +29,7 @@ import {
 } from './map/painting';
 
 // 4. UI functions
+import { initAuth } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
 import {
@@ -59,6 +60,14 @@ const zoomOutBtn = document.querySelector<HTMLElement>('#zo');
 const zoomInBtn = document.querySelector<HTMLElement>('#zi');
 const zoomFitBtn = document.querySelector<HTMLElement>('#zf');
 const savePngBtn = document.querySelector<HTMLElement>('#png');
+const authBtn = document.querySelector<HTMLElement>('#auth-btn');
+
+const authModal = document.querySelector<HTMLElement>('#auth-modal');
+const authForm = document.querySelector<HTMLFormElement>('#auth-form');
+const authEmail = document.querySelector<HTMLInputElement>('#auth-email');
+const authPassword = document.querySelector<HTMLInputElement>('#auth-password');
+const authError = document.querySelector<HTMLElement>('#auth-error');
+const authCancel = document.querySelector<HTMLElement>('#auth-cancel');
 
 // State
 const COLOR_STORAGE_KEY = 'rrh-colors-v1';
@@ -372,6 +381,29 @@ renderChips(chipsContainer, statuses, currentStatus, {
 initMapSelector(mapSelect, MAPS, currentMapIndex, (newIndex) => {
   openMap(newIndex);
 });
+
+// Initialize Auth UI
+if (authModal && authForm && authEmail && authPassword && authError && authBtn) {
+  initAuth(
+    {
+      modal: authModal,
+      form: authForm,
+      emailInput: authEmail,
+      passwordInput: authPassword,
+      errorContainer: authError,
+      authButton: authBtn,
+      cancelButton: authCancel,
+    },
+    {
+      onLogin: (user) => {
+        showToast(toastElement, `Signed in as ${user.email}`);
+      },
+      onSignOut: () => {
+        showToast(toastElement, 'Signed out');
+      },
+    }
+  );
+}
 
 // Initial map load
 openMap(currentMapIndex);

@@ -24,6 +24,7 @@
         <button id="zi">+</button>
         <button id="zf">Fit</button>
         <button id="png">Save PNG</button>
+        <button id="auth-btn">Sign In</button>
       </div>
       <small>Click a lot to paint it · drag to pan · keys 1 2 3 = status</small>
     </header>
@@ -36,6 +37,23 @@
       </div>
     </main>
     <div id="t"></div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="modal-overlay" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h2>Sign In</h2>
+        <div id="auth-error" class="auth-error"></div>
+        <form id="auth-form" class="modal-form">
+          <input type="email" id="auth-email" placeholder="Email" required autocomplete="email" />
+          <input type="password" id="auth-password" placeholder="Password" required autocomplete="current-password" />
+          <div class="modal-actions">
+            <button type="button" id="auth-cancel">Cancel</button>
+            <button type="submit" class="on">Sign In</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

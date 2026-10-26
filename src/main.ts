@@ -28,7 +28,10 @@ import {
   type StatusMap,
 } from './map/painting';
 
-// 4. UI functions
+// 4. API & UI functions
+import type { User } from '@supabase/supabase-js';
+import { supabase } from './api/supabase';
+import { loadMarks, saveMark, deleteMark, clearAllMarks } from './api/marks';
 import { initAuth } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
@@ -77,6 +80,9 @@ const statuses: StatusMap = {
   a: { ...DEFAULT_STATUSES.a },
 };
 
+let currentUser: User | null = null;
+let currentProjectId: string | null = null;
+
 let currentMapIndex = 0;
 let mapToken = 0;
 let mapWidth = 0;
@@ -102,7 +108,7 @@ function getStorageKey(): string {
 
 function saveState(): void {
   try {
-    const serializedMarks = marks.map(({ t, x, y, s }) => ({ t, x, y, s }));
+    const serializedMarks = marks.map(({ id, t, x, y, s }) => ({ id, t, x, y, s }));
     localStorage.setItem(getStorageKey(), JSON.stringify({ marks: serializedMarks, lg: legendPos }));
     const savedColors = Object.fromEntries(
       Object.entries(statuses).map(([k, v]) => [k, v.c])
@@ -143,11 +149,23 @@ function setZoom(factor: number): void {
   applyZoom(box, mapWidth, currentZoom);
 }
 
-function undo(): void {
+async function undo(): Promise<void> {
   if (history.length > 0) {
+    const previousMarks = marks;
     marks = history.pop()!;
     renderAll();
     saveState();
+
+    // If a mark was removed by undo, delete it from Supabase as well
+    if (currentUser && previousMarks.length > marks.length) {
+      const removedMark = previousMarks[previousMarks.length - 1];
+      if (removedMark?.id) {
+        const { error } = await deleteMark(removedMark.id);
+        if (error) {
+          console.warn('Supabase deleteMark on undo error:', error.message);
+        }
+      }
+    }
   }
 }
 
@@ -163,6 +181,28 @@ function setMode(mode: PaintMode): void {
   setToolbarMode(modeButtons, currentMode, box);
 }
 
+/**
+ * Resolves the Supabase project UUID matching the current map image or name.
+ */
+async function resolveProjectId(mapIndex: number): Promise<string | null> {
+  const mapData = MAPS[mapIndex];
+  try {
+    const { data } = await supabase
+      .from('projects')
+      .select('id, name, map_url')
+      .or(`map_url.eq.${mapData.img},name.eq.${mapData.n}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (data?.id) {
+      return data.id;
+    }
+  } catch (err) {
+    console.warn('Could not resolve project ID from Supabase:', err);
+  }
+  return null;
+}
+
 // Map Loading
 async function openMap(index: number): Promise<void> {
   currentMapIndex = index;
@@ -173,20 +213,6 @@ async function openMap(index: number): Promise<void> {
   history = [];
   marks = [];
   legendPos = [...MAPS[index].lg];
-
-  // Restore saved marks and legend position
-  try {
-    const raw = localStorage.getItem(getStorageKey());
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      marks = Array.isArray(parsed) ? parsed : parsed.marks || [];
-      if (parsed && parsed.lg) {
-        legendPos = parsed.lg;
-      }
-    }
-  } catch {
-    // Ignore corrupt storage
-  }
 
   try {
     localStorage.setItem('rrh-last', MAPS[index].id);
@@ -205,16 +231,66 @@ async function openMap(index: number): Promise<void> {
 
     barrierMap = drawBaseMap(baseCanvas, img);
 
-    // Reconstruct lot spans for stored fill marks
-    marks = marks.filter((m) => {
-      if (m.t === 'p') return true;
-      const spans = region(m.x, m.y, mapWidth, mapHeight, barrierMap!);
-      if (spans) {
-        m.sp = spans;
-        return true;
+    // 1. Try to resolve project ID from Supabase
+    currentProjectId = await resolveProjectId(index);
+
+    let loadedFromSupabase = false;
+
+    // 2. If project ID resolved, attempt to load marks from Supabase
+    if (currentProjectId) {
+      const { data: supaMarks, error } = await loadMarks(currentProjectId);
+      if (!error && supaMarks && supaMarks.length > 0) {
+        loadedFromSupabase = true;
+        marks = supaMarks
+          .map((row) => {
+            const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+            const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+            const m: Mark = {
+              id: row.id,
+              t: row.kind === 'pin' ? 'p' : 'f',
+              x: px,
+              y: py,
+              s: row.status,
+            };
+            if (m.t === 'f') {
+              const spans = region(px, py, mapWidth, mapHeight, barrierMap!);
+              if (spans) m.sp = spans;
+            }
+            return m;
+          })
+          .filter((m) => m.t === 'p' || m.sp);
+
+        // Keep local storage synchronized with latest Supabase state
+        saveState();
       }
-      return false;
-    });
+    }
+
+    // 3. Fallback to localStorage if not loaded from Supabase (or user is offline/unauthenticated)
+    if (!loadedFromSupabase) {
+      try {
+        const raw = localStorage.getItem(getStorageKey());
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          marks = Array.isArray(parsed) ? parsed : parsed.marks || [];
+          if (parsed && parsed.lg) {
+            legendPos = parsed.lg;
+          }
+        }
+      } catch {
+        // Ignore corrupt storage
+      }
+
+      // Reconstruct lot spans for stored fill marks
+      marks = marks.filter((m) => {
+        if (m.t === 'p') return true;
+        const spans = region(m.x, m.y, mapWidth, mapHeight, barrierMap!);
+        if (spans) {
+          m.sp = spans;
+          return true;
+        }
+        return false;
+      });
+    }
 
     loadingIndicator.style.display = 'none';
     stage.scrollTo(0, 0);
@@ -228,7 +304,7 @@ async function openMap(index: number): Promise<void> {
 
 // 5. Event Listeners
 // Canvas click for painting, erasing, pinning, moving legend
-box.addEventListener('click', (e: MouseEvent) => {
+box.addEventListener('click', async (e: MouseEvent) => {
   if (pointerMoved || !barrierMap || !mapWidth || !mapHeight) return;
 
   const { x, y } = screenToMapCoords(e.clientX, e.clientY, box, mapWidth, mapHeight);
@@ -262,6 +338,38 @@ box.addEventListener('click', (e: MouseEvent) => {
     marks = result.updatedMarks;
     renderAll();
     saveState();
+
+    // If an existing mark was erased or replaced, delete it from Supabase
+    if (currentUser && result.erasedMark?.id) {
+      deleteMark(result.erasedMark.id).catch((err) =>
+        console.warn('Supabase deleteMark error:', err)
+      );
+    }
+
+    // If a new mark was placed or filled, save it to Supabase
+    if (result.addedMark) {
+      if (currentUser && currentProjectId) {
+        const markToSave = result.addedMark;
+        const normX = markToSave.x / mapWidth;
+        const normY = markToSave.y / mapHeight;
+
+        const { data, error } = await saveMark({
+          project_id: currentProjectId,
+          x: normX,
+          y: normY,
+          status: markToSave.s,
+          kind: markToSave.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
+
+        if (error) {
+          console.warn('Supabase saveMark error (saved locally):', error.message);
+        } else if (data?.id) {
+          markToSave.id = data.id;
+          saveState(); // update localStorage with Supabase UUID
+        }
+      }
+    }
   }
 });
 
@@ -284,9 +392,14 @@ window.addEventListener('pointerup', () => {
 });
 
 // UI Toolbar & Mode buttons
-initModeButtons(modeButtons, currentMode, (newMode) => {
-  currentMode = newMode;
-}, box);
+initModeButtons(
+  modeButtons,
+  currentMode,
+  (newMode) => {
+    currentMode = newMode;
+  },
+  box
+);
 
 initActionButtons(
   {
@@ -298,10 +411,21 @@ initActionButtons(
     savePng: savePngBtn,
   },
   {
-    onUndo: undo,
-    onClear: () => {
+    onUndo: () => {
+      undo();
+    },
+    onClear: async () => {
       if (marks.length > 0) {
         snapshot();
+
+        // If authenticated and project_id exists, delete all marks from Supabase
+        if (currentUser && currentProjectId) {
+          const { error } = await clearAllMarks(currentProjectId);
+          if (error) {
+            console.warn('Supabase clearAllMarks error:', error.message);
+          }
+        }
+
         marks = [];
         renderAll();
         saveState();
@@ -317,7 +441,15 @@ initActionButtons(
         if (!blob) return;
         const filename = `RCD-${MAPS[currentMapIndex].id}-status-map.png`;
         try {
-          const claude = (window as unknown as { claude?: { use: (svc: string) => Promise<{ save: (opts: { filename: string; data: Blob }) => Promise<void> }> } }).claude;
+          const claude = (
+            window as unknown as {
+              claude?: {
+                use: (
+                  svc: string
+                ) => Promise<{ save: (opts: { filename: string; data: Blob }) => Promise<void> }>;
+              };
+            }
+          ).claude;
           const downloads = claude && (await claude.use('downloads'));
           if (downloads) {
             await downloads.save({ filename, data: blob });
@@ -340,7 +472,9 @@ initActionButtons(
 // Keyboard Shortcuts (Ctrl+Z, 1 2 3 status, F/P/E modes)
 const statusKeys = ['c', 'o', 'a'];
 initKeyboardShortcuts({
-  onUndo: undo,
+  onUndo: () => {
+    undo();
+  },
   onSelectStatusIndex: (index) => {
     if (statusKeys[index]) {
       setStatus(statusKeys[index]);
@@ -396,9 +530,13 @@ if (authModal && authForm && authEmail && authPassword && authError && authBtn) 
     },
     {
       onLogin: (user) => {
+        currentUser = user;
         showToast(toastElement, `Signed in as ${user.email}`);
+        // Reload map marks from Supabase now that we are authenticated
+        openMap(currentMapIndex);
       },
       onSignOut: () => {
+        currentUser = null;
         showToast(toastElement, 'Signed out');
       },
     }

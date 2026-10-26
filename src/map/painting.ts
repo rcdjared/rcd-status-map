@@ -4,6 +4,7 @@ import { snap, region } from './flood-fill';
 export type MarkType = 'f' | 'p';
 
 export interface Mark {
+  id?: string; // Supabase mark UUID if saved
   t: MarkType;
   x: number;
   y: number;
@@ -138,6 +139,8 @@ export interface PaintClickResult {
   updatedLegend?: [number, number];
   error?: string;
   actionTaken: boolean;
+  addedMark?: Mark;
+  erasedMark?: Mark;
 }
 
 /**
@@ -180,15 +183,17 @@ export function handleMapClick(
     if (index < 0) {
       return { updatedMarks: marks, actionTaken: false };
     }
+    const erasedMark = marks[index];
     const updatedMarks = [...marks];
     updatedMarks.splice(index, 1);
-    return { updatedMarks, actionTaken: true };
+    return { updatedMarks, erasedMark, actionTaken: true };
   }
 
   if (mode === 'pin') {
     const newMark: Mark = { t: 'p', x, y, s: currentStatus };
     return {
       updatedMarks: [...marks, newMark],
+      addedMark: newMark,
       actionTaken: true,
     };
   }
@@ -208,11 +213,20 @@ export function handleMapClick(
   }
 
   // Remove any existing fill mark that intersects with the same clicked spot
-  const filtered = marks.filter((m) => !(m.t === 'f' && hit(m, q[0], q[1], pinRadius)));
+  let erasedExisting: Mark | undefined;
+  const filtered = marks.filter((m) => {
+    if (m.t === 'f' && hit(m, q[0], q[1], pinRadius)) {
+      erasedExisting = m;
+      return false;
+    }
+    return true;
+  });
   const newMark: Mark = { t: 'f', x: q[0], y: q[1], s: currentStatus, sp };
 
   return {
     updatedMarks: [...filtered, newMark],
+    addedMark: newMark,
+    erasedMark: erasedExisting,
     actionTaken: true,
   };
 }

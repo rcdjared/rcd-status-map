@@ -864,6 +864,15 @@ if (authModal && authForm && authEmail && authPassword && authError && authBtn) 
   );
 }
 
+// Navigation tab listeners
+navMapBtn?.addEventListener('click', () => {
+  switchToMap();
+});
+
+navUsersBtn?.addEventListener('click', async () => {
+  await switchToUsers();
+});
+
 // Default to Viewer View initially
 applyUserRole('viewer');
 

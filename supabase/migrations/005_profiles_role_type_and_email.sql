@@ -23,6 +23,7 @@ alter table public.profiles add column if not exists email text;
 alter table public.profiles add column if not exists created_at timestamptz not null default now();
 
 -- Transition existing role column if it was text to app_role enum
+-- Note: In PostgreSQL, if existing policies reference profiles.role, they must be dropped before altering the column type.
 do $$
 begin
   -- Drop existing text check constraint if present
@@ -38,6 +39,16 @@ begin
     select 1 from information_schema.columns
     where table_name = 'profiles' and column_name = 'role' and udt_name = 'text'
   ) then
+    -- Drop old policies that reference profiles.role to avoid ERROR 0A000: cannot alter type of a column used in a policy definition
+    drop policy if exists "Admins can insert projects" on public.projects;
+    drop policy if exists "Admins can update projects" on public.projects;
+    drop policy if exists "Admins can delete projects" on public.projects;
+    drop policy if exists "Editors and admins can insert marks" on public.marks;
+    drop policy if exists "Editors and admins can update marks" on public.marks;
+    drop policy if exists "Editors and admins can delete marks" on public.marks;
+    drop policy if exists "Editors and admins can insert mark history" on public.mark_history;
+
+    -- Alter column type to app_role
     alter table public.profiles alter column role drop default;
     alter table public.profiles alter column role type public.app_role using role::public.app_role;
     alter table public.profiles alter column role set default 'viewer'::public.app_role;

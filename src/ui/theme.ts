@@ -41,7 +41,7 @@ export function applyTheme(theme: Theme): void {
     const text = btn.querySelector('.theme-btn-text');
     if (theme === 'dark-green') {
       if (icon) icon.textContent = '🌲';
-      if (text) text.textContent = 'Dark Green';
+      if (text) text.textContent = 'Dark';
       btn.setAttribute('aria-label', 'Switch to Light Mode');
       btn.title = 'Current: Dark Green (click to switch to Light)';
       btn.classList.add('is-dark-green');

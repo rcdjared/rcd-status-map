@@ -10,15 +10,13 @@ import {
   loadMapImage,
   setupCanvases,
   drawBaseMap,
-  calculateZoom,
   applyZoom,
+  applyTransform,
+  fitMap,
+  zoomAtCursor,
   screenToMapCoords,
-  createPanState,
-  handlePanMove,
-  zoomAtPoint,
   compositeForExport,
   type CanvasGroup,
-  type PanDragState,
 } from './map/canvas';
 import { region } from './map/flood-fill';
 import {
@@ -44,6 +42,7 @@ import {
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
+import { initMapModals } from './ui/map-modals';
 import { initTheme } from './ui/theme';
 import {
   initActionButtons,
@@ -63,6 +62,8 @@ const box = document.querySelector<HTMLElement>('#box')!;
 const stage = document.querySelector<HTMLElement>('#stage')!;
 const chipsContainer = document.querySelector<HTMLElement>('#chips')!;
 const mapSelect = document.querySelector<HTMLSelectElement>('#mp')!;
+const btnUploadMap = document.querySelector<HTMLButtonElement>('#btn-upload-map');
+const btnDeleteMap = document.querySelector<HTMLButtonElement>('#btn-delete-map');
 const loadingIndicator = document.querySelector<HTMLElement>('#ld')!;
 const toastElement = document.querySelector<HTMLElement>('#t')!;
 
@@ -111,6 +112,7 @@ const statuses: StatusMap = {
 let currentUser: User | null = null;
 let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
 let currentProjectId: string | null = null;
+let currentProject: Project | null = null;
 let marksSubscriptionCleanup: (() => void) | null = null;
 let usersManager: ReturnType<typeof initUsersManagement> | null = null;
 
@@ -128,7 +130,14 @@ let currentStatus = 'c';
 let currentMode: PaintMode = 'fill';
 let currentZoom = 1;
 
-let panState: PanDragState | null = null;
+// 2D Pan and Drag State (supports dragging in all directions)
+let panX = 0;
+let panY = 0;
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let initialPanX = 0;
+let initialPanY = 0;
 let pointerMoved = false;
 
 // Navigation view switching
@@ -239,6 +248,14 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
     navUsersBtn.style.display = isAdmin ? 'inline-flex' : 'none';
   }
 
+  // Show Map upload and delete controls only for Admin
+  if (btnUploadMap) {
+    btnUploadMap.style.display = isAdmin ? 'inline-flex' : 'none';
+  }
+  if (btnDeleteMap) {
+    btnDeleteMap.style.display = isAdmin ? 'inline-flex' : 'none';
+  }
+
   // If user was viewing users panel and got demoted, redirect back to map
   if (!isAdmin && usersView && usersView.style.display !== 'none') {
     switchToMap();
@@ -346,20 +363,41 @@ function renderAll(): void {
   updateChipCounts(chipsContainer, counts);
 }
 
+function fitAndCenterMap(): void {
+  if (!mapWidth || !mapHeight) return;
+  const fit = fitMap(stage.clientWidth, stage.clientHeight, mapWidth, mapHeight, 20);
+  currentZoom = fit.zoom;
+  panX = fit.panX;
+  panY = fit.panY;
+  applyZoom(box, mapWidth, currentZoom, mapHeight);
+  applyTransform(box, panX, panY);
+}
+
 function setZoom(factor: number): void {
-  if (!mapWidth) return;
+  if (!mapWidth || !mapHeight) return;
   if (!factor) {
-    // Fit to viewport
-    currentZoom = calculateZoom(currentZoom, 0, stage.clientWidth, mapWidth);
-    applyZoom(box, mapWidth, currentZoom);
-    stage.scrollLeft = 0;
-    stage.scrollTop = 0;
+    fitAndCenterMap();
     return;
   }
-  const rect = stage.getBoundingClientRect();
-  const centerX = rect.left + stage.clientWidth / 2;
-  const centerY = rect.top + stage.clientHeight / 2;
-  currentZoom = zoomAtPoint(factor, centerX, centerY, currentZoom, stage, box, mapWidth);
+  const stageRect = stage.getBoundingClientRect();
+  const centerX = stageRect.left + stage.clientWidth / 2;
+  const centerY = stageRect.top + stage.clientHeight / 2;
+  const res = zoomAtCursor(
+    factor,
+    centerX,
+    centerY,
+    currentZoom,
+    panX,
+    panY,
+    stage,
+    mapWidth,
+    mapHeight
+  );
+  currentZoom = res.zoom;
+  panX = res.panX;
+  panY = res.panY;
+  applyZoom(box, mapWidth, currentZoom, mapHeight);
+  applyTransform(box, panX, panY);
 }
 
 async function undo(): Promise<void> {
@@ -509,8 +547,7 @@ async function openMap(index: number): Promise<void> {
     }
 
     loadingIndicator.style.display = 'none';
-    stage.scrollTo(0, 0);
-    setZoom(0);
+    fitAndCenterMap();
     renderAll();
   } catch (err) {
     console.error('Failed to load map image:', err);
@@ -523,6 +560,7 @@ async function openMap(index: number): Promise<void> {
  */
 async function openProject(proj: Project): Promise<void> {
   currentProjectId = proj.id;
+  currentProject = proj;
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -596,8 +634,7 @@ async function openProject(proj: Project): Promise<void> {
     }
 
     loadingIndicator.style.display = 'none';
-    stage.scrollTo(0, 0);
-    setZoom(0);
+    fitAndCenterMap();
     renderAll();
   } catch (err) {
     console.error('Failed to load project map:', err);
@@ -682,25 +719,46 @@ box.addEventListener('click', async (e: MouseEvent) => {
   }
 });
 
-// Drag to Pan
+// Drag to Pan in ALL directions (left, right, up, down, diagonally)
 stage.addEventListener('pointerdown', (e: PointerEvent) => {
+  if (e.button !== 0 && e.button !== 1) return;
+  isDragging = true;
   pointerMoved = false;
-  panState = createPanState(e, stage);
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  initialPanX = panX;
+  initialPanY = panY;
+  stage.setPointerCapture(e.pointerId);
   stage.classList.add('is-panning');
 });
 
 window.addEventListener('pointermove', (e: PointerEvent) => {
-  if (!panState) return;
-  const moved = handlePanMove(panState, e, stage);
-  if (moved) {
+  if (!isDragging) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
+  if (!pointerMoved && Math.hypot(dx, dy) > 4) {
     pointerMoved = true;
+  }
+  if (pointerMoved) {
+    panX = initialPanX + dx;
+    panY = initialPanY + dy;
+    applyTransform(box, panX, panY);
   }
 });
 
-window.addEventListener('pointerup', () => {
-  panState = null;
+const handlePointerUp = (e: PointerEvent) => {
+  if (!isDragging) return;
+  isDragging = false;
+  try {
+    stage.releasePointerCapture(e.pointerId);
+  } catch {
+    // pointer capture might already be released
+  }
   stage.classList.remove('is-panning');
-});
+};
+
+window.addEventListener('pointerup', handlePointerUp);
+window.addEventListener('pointercancel', handlePointerUp);
 
 // Suppress context menu if the user was right-click dragging
 stage.addEventListener('contextmenu', (e: MouseEvent) => {
@@ -714,17 +772,38 @@ stage.addEventListener(
   'wheel',
   (e: WheelEvent) => {
     e.preventDefault();
-    if (!mapWidth) return;
+    if (!mapWidth || !mapHeight) return;
 
     // Normalizing wheel delta: scroll up zooms in, scroll down zooms out
     const factor = e.deltaY < 0 ? 1.15 : 0.87;
-    currentZoom = zoomAtPoint(factor, e.clientX, e.clientY, currentZoom, stage, box, mapWidth);
+    const res = zoomAtCursor(
+      factor,
+      e.clientX,
+      e.clientY,
+      currentZoom,
+      panX,
+      panY,
+      stage,
+      mapWidth,
+      mapHeight
+    );
+    currentZoom = res.zoom;
+    panX = res.panX;
+    panY = res.panY;
+    applyZoom(box, mapWidth, currentZoom, mapHeight);
+    applyTransform(box, panX, panY);
   },
   { passive: false }
 );
 
-// Mobile & Tablet Touch Pinch-to-Zoom
+// Mobile & Tablet Touch Pinch-to-Zoom and Pan
 let touchPinchDist = 0;
+let initialPinchZoom = 1;
+let initialPinchPanX = 0;
+let initialPinchPanY = 0;
+let initialPinchMidX = 0;
+let initialPinchMidY = 0;
+
 stage.addEventListener(
   'touchstart',
   (e: TouchEvent) => {
@@ -732,6 +811,11 @@ stage.addEventListener(
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       touchPinchDist = Math.hypot(dx, dy);
+      initialPinchZoom = currentZoom;
+      initialPinchPanX = panX;
+      initialPinchPanY = panY;
+      initialPinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      initialPinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
     }
   },
   { passive: true }
@@ -740,16 +824,31 @@ stage.addEventListener(
 stage.addEventListener(
   'touchmove',
   (e: TouchEvent) => {
-    if (e.touches.length === 2 && touchPinchDist > 0 && mapWidth) {
+    if (e.touches.length === 2 && touchPinchDist > 0 && mapWidth && mapHeight) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.hypot(dx, dy);
       const factor = dist / touchPinchDist;
-      touchPinchDist = dist;
 
-      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      currentZoom = zoomAtPoint(factor, midX, midY, currentZoom, stage, box, mapWidth);
+      const currentMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const currentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+      const res = zoomAtCursor(
+        factor,
+        initialPinchMidX,
+        initialPinchMidY,
+        initialPinchZoom,
+        initialPinchPanX + (currentMidX - initialPinchMidX),
+        initialPinchPanY + (currentMidY - initialPinchMidY),
+        stage,
+        mapWidth,
+        mapHeight
+      );
+      currentZoom = res.zoom;
+      panX = res.panX;
+      panY = res.panY;
+      applyZoom(box, mapWidth, currentZoom, mapHeight);
+      applyTransform(box, panX, panY);
     }
   },
   { passive: true }
@@ -898,20 +997,59 @@ renderChips(chipsContainer, statuses, currentStatus, {
 });
 
 // Initialize project list (loads from Supabase if projects exist, else falls back to local MAPS)
-async function initProjectList(): Promise<void> {
+async function initProjectList(preferredProjectId?: string): Promise<void> {
   const { data: projects, error } = await loadProjects();
   if (!error && projects && projects.length > 0) {
-    populateProjectSelect(mapSelect, projects, projects[0].id, (selectedProj) => {
+    const targetId = preferredProjectId || currentProjectId || projects[0].id;
+    const targetProj = projects.find((p) => p.id === targetId) || projects[0];
+    currentProject = targetProj;
+
+    populateProjectSelect(mapSelect, projects, targetProj.id, (selectedProj) => {
+      currentProject = selectedProj;
       openProject(selectedProj);
     });
-    await openProject(projects[0]);
+    await openProject(targetProj);
   } else {
+    currentProject = null;
     initMapSelector(mapSelect, MAPS, currentMapIndex, (newIndex) => {
       openMap(newIndex);
     });
     await openMap(currentMapIndex);
   }
 }
+
+// Initialize Map Modals for Admin (Upload & Remove Map)
+const mapModals = initMapModals({
+  onProjectCreated: async (newProj) => {
+    await initProjectList(newProj.id);
+  },
+  onProjectDeleted: async () => {
+    currentProjectId = null;
+    currentProject = null;
+    await initProjectList();
+  },
+  showToast: (msg) => showToast(toastElement, msg),
+});
+
+btnUploadMap?.addEventListener('click', () => {
+  if (currentUserRole !== 'admin') {
+    showToast(toastElement, 'Access denied: Admin permissions required to upload maps.');
+    return;
+  }
+  mapModals.openUploadModal();
+});
+
+btnDeleteMap?.addEventListener('click', () => {
+  if (currentUserRole !== 'admin') {
+    showToast(toastElement, 'Access denied: Admin permissions required to delete maps.');
+    return;
+  }
+  if (currentProject) {
+    mapModals.openDeleteModal(currentProject);
+  } else {
+    showToast(toastElement, 'Default built-in template maps cannot be deleted.');
+  }
+});
 
 // Initialize Authentication Gate & Route Guard
 if (authScreen && appRoot && authForm && authEmail && authPassword && authError) {

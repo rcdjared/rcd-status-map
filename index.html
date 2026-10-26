@@ -105,8 +105,23 @@
         </div>
       </div>
 
-      <div class="header-controls" id="header-controls">
-        <select id="mp" aria-label="Select subdivision project"></select>
+        <div class="map-select-group">
+          <select id="mp" aria-label="Select subdivision project"></select>
+          <button type="button" id="btn-upload-map" class="admin-only map-action-btn" title="Upload new map (PDF, PNG, JPG)" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>+ Map</span>
+          </button>
+          <button type="button" id="btn-delete-map" class="admin-only map-action-btn btn-danger-icon" title="Delete current map" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
         <div class="g" id="chips"></div>
         <div class="g" id="edit-tools">
           <button data-m="fill" class="on">Paint lot</button>

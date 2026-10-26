@@ -82,6 +82,27 @@ export function drawBaseMap(
 }
 
 /**
+ * Calculates zoom level and initial pan offset to fit the map completely
+ * within the stage viewport (both width and height) and center it with padding.
+ */
+export function fitMap(
+  stageWidth: number,
+  stageHeight: number,
+  mapWidth: number,
+  mapHeight: number,
+  padding = 24
+): { zoom: number; panX: number; panY: number } {
+  const availableW = Math.max(80, stageWidth - padding * 2);
+  const availableH = Math.max(80, stageHeight - padding * 2);
+  const zoom = Math.min(availableW / mapWidth, availableH / mapHeight);
+  const renderedW = mapWidth * zoom;
+  const renderedH = mapHeight * zoom;
+  const panX = Math.round((stageWidth - renderedW) / 2);
+  const panY = Math.round((stageHeight - renderedH) / 2);
+  return { zoom, panX, panY };
+}
+
+/**
  * Calculates new zoom level given a factor, stage client width, and map width.
  * If factor is 0 (or fit is requested), returns the fit-to-width zoom level.
  */
@@ -95,18 +116,33 @@ export function calculateZoom(
   if (!factor) {
     return fit;
   }
-  return Math.min(Math.max(currentZoom * factor, fit * 0.6), fit * 6);
+  return Math.min(Math.max(currentZoom * factor, fit * 0.4), fit * 8);
 }
 
 /**
- * Applies the zoom level by setting the CSS width on the map container box element.
+ * Applies the zoom level by setting the CSS dimensions on the map container box element.
  */
 export function applyZoom(
   boxElement: HTMLElement,
   mapWidth: number,
-  zoomLevel: number
+  zoomLevel: number,
+  mapHeight?: number
 ): void {
-  boxElement.style.width = `${mapWidth * zoomLevel}px`;
+  boxElement.style.width = `${Math.round(mapWidth * zoomLevel)}px`;
+  if (mapHeight) {
+    boxElement.style.height = `${Math.round(mapHeight * zoomLevel)}px`;
+  }
+}
+
+/**
+ * Applies 2D translation (panning in all directions) on the map container box element.
+ */
+export function applyTransform(
+  boxElement: HTMLElement,
+  panX: number,
+  panY: number
+): void {
+  boxElement.style.transform = `translate3d(${Math.round(panX)}px, ${Math.round(panY)}px, 0)`;
 }
 
 /**
@@ -124,6 +160,42 @@ export function screenToMapCoords(
   const x = Math.round(((clientX - rect.left) * mapWidth) / rect.width);
   const y = Math.round(((clientY - rect.top) * mapHeight) / rect.height);
   return { x, y };
+}
+
+/**
+ * Zooms smoothly toward an arbitrary viewport coordinate point (e.g. mouse cursor or pinch midpoint),
+ * keeping the exact point under the cursor stationary while updating panX and panY in all directions.
+ */
+export function zoomAtCursor(
+  factor: number,
+  cursorX: number,
+  cursorY: number,
+  currentZoom: number,
+  panX: number,
+  panY: number,
+  stageElement: HTMLElement,
+  _mapWidth: number,
+  _mapHeight: number
+): { zoom: number; panX: number; panY: number } {
+  const stageRect = stageElement.getBoundingClientRect();
+  const relX = cursorX - stageRect.left;
+  const relY = cursorY - stageRect.top;
+
+  const minZoom = 0.05;
+  const maxZoom = 15;
+  const newZoom = Math.min(Math.max(currentZoom * factor, minZoom), maxZoom);
+
+  if (Math.abs(newZoom - currentZoom) < 0.0001) {
+    return { zoom: currentZoom, panX, panY };
+  }
+
+  // Anchor equation:
+  // relX - newPanX = (relX - panX) * (newZoom / currentZoom)
+  const ratio = newZoom / currentZoom;
+  const newPanX = relX - (relX - panX) * ratio;
+  const newPanY = relY - (relY - panY) * ratio;
+
+  return { zoom: newZoom, panX: newPanX, panY: newPanY };
 }
 
 /**

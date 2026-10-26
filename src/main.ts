@@ -365,6 +365,14 @@ function renderAll(): void {
 
 function fitAndCenterMap(): void {
   if (!mapWidth || !mapHeight) return;
+
+  // If the stage hasn't been laid out yet (e.g. display was just changed from none),
+  // defer to the next animation frame so clientWidth/clientHeight are measured correctly.
+  if (stage.clientWidth === 0 || stage.clientHeight === 0) {
+    requestAnimationFrame(() => fitAndCenterMap());
+    return;
+  }
+
   const fit = fitMap(stage.clientWidth, stage.clientHeight, mapWidth, mapHeight, 20);
   currentZoom = fit.zoom;
   panX = fit.panX;
@@ -643,8 +651,8 @@ async function openProject(proj: Project): Promise<void> {
 }
 
 // 5. Event Listeners
-// Canvas click for painting, erasing, pinning, moving legend
-box.addEventListener('click', async (e: MouseEvent) => {
+// Handle painting, erasing, pinning, and moving legend on the map
+async function processMapClick(clientX: number, clientY: number): Promise<void> {
   if (pointerMoved || !barrierMap || !mapWidth || !mapHeight) return;
 
   // Viewers cannot paint, erase, pin, or move legend
@@ -653,7 +661,7 @@ box.addEventListener('click', async (e: MouseEvent) => {
     return;
   }
 
-  const { x, y } = screenToMapCoords(e.clientX, e.clientY, box, mapWidth, mapHeight);
+  const { x, y } = screenToMapCoords(clientX, clientY, box, mapWidth, mapHeight);
 
   if (currentMode === 'lg') {
     legendPos = [Math.min(x / mapWidth, 0.73), Math.min(y / mapHeight, 0.935)];
@@ -717,9 +725,25 @@ box.addEventListener('click', async (e: MouseEvent) => {
       }
     }
   }
+}
+
+// Attach map click handler to stage, verifying the click is within the rendered map box
+stage.addEventListener('click', async (e: MouseEvent) => {
+  if (pointerMoved) return;
+  const boxRect = box.getBoundingClientRect();
+  if (
+    e.clientX >= boxRect.left &&
+    e.clientX <= boxRect.right &&
+    e.clientY >= boxRect.top &&
+    e.clientY <= boxRect.bottom
+  ) {
+    await processMapClick(e.clientX, e.clientY);
+  }
 });
 
 // Drag to Pan in ALL directions (left, right, up, down, diagonally)
+let activePointerId: number | null = null;
+
 stage.addEventListener('pointerdown', (e: PointerEvent) => {
   if (e.button !== 0 && e.button !== 1) return;
   isDragging = true;
@@ -728,8 +752,7 @@ stage.addEventListener('pointerdown', (e: PointerEvent) => {
   dragStartY = e.clientY;
   initialPanX = panX;
   initialPanY = panY;
-  stage.setPointerCapture(e.pointerId);
-  stage.classList.add('is-panning');
+  activePointerId = e.pointerId;
 });
 
 window.addEventListener('pointermove', (e: PointerEvent) => {
@@ -738,6 +761,14 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
   const dy = e.clientY - dragStartY;
   if (!pointerMoved && Math.hypot(dx, dy) > 4) {
     pointerMoved = true;
+    stage.classList.add('is-panning');
+    if (activePointerId !== null) {
+      try {
+        stage.setPointerCapture(activePointerId);
+      } catch {
+        // ignore capture errors
+      }
+    }
   }
   if (pointerMoved) {
     panX = initialPanX + dx;
@@ -749,10 +780,15 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
 const handlePointerUp = (e: PointerEvent) => {
   if (!isDragging) return;
   isDragging = false;
-  try {
-    stage.releasePointerCapture(e.pointerId);
-  } catch {
-    // pointer capture might already be released
+  if (activePointerId !== null) {
+    try {
+      if (stage.hasPointerCapture(activePointerId)) {
+        stage.releasePointerCapture(activePointerId);
+      }
+    } catch {
+      // pointer capture might already be released
+    }
+    activePointerId = null;
   }
   stage.classList.remove('is-panning');
 };

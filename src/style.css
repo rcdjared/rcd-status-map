@@ -52,6 +52,14 @@ body {
   font: 14px/1.4 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
 }
 
+#app-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 header {
   background: var(--sf);
   border-bottom: 1px solid var(--bd);
@@ -241,7 +249,7 @@ button.on {
   background: #fff;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
   transform-origin: 0 0;
-  will-change: transform, width, height;
+  will-change: transform;
 }
 
 #box canvas {

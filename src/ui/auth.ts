@@ -44,7 +44,7 @@ export function showAppScreen(elements: {
   disabledScreen?: HTMLElement | null;
 }): void {
   elements.authScreen.style.display = 'none';
-  elements.appRoot.style.display = 'block';
+  elements.appRoot.style.display = 'flex';
   if (elements.disabledScreen) {
     elements.disabledScreen.style.display = 'none';
   }

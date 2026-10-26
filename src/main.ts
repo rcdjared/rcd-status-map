@@ -7,6 +7,7 @@ import { MAPS } from './map/data';
 // 3. Canvas and painting logic
 import {
   loadMap,
+  loadMapImage,
   setupCanvases,
   drawBaseMap,
   calculateZoom,
@@ -30,8 +31,9 @@ import {
 
 // 4. API & UI functions
 import type { User } from '@supabase/supabase-js';
-import { supabase } from './api/supabase';
+import { supabase, type Project } from './api/supabase';
 import { loadMarks, saveMark, deleteMark, clearAllMarks } from './api/marks';
+import { loadProjects, populateProjectSelect } from './api/projects';
 import { initAuth } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
@@ -302,6 +304,89 @@ async function openMap(index: number): Promise<void> {
   }
 }
 
+/**
+ * Loads a project directly from its Supabase record.
+ */
+async function openProject(proj: Project): Promise<void> {
+  currentProjectId = proj.id;
+  const thisToken = ++mapToken;
+
+  loadingIndicator.style.display = 'grid';
+  barrierMap = null;
+  history = [];
+  marks = [];
+  legendPos = [proj.legend_x ?? 0.5, proj.legend_y ?? 0.5];
+
+  try {
+    const img = await loadMapImage(proj.map_url);
+    if (thisToken !== mapToken) return;
+
+    const dims = setupCanvases(canvases, img.width, img.height);
+    mapWidth = dims.width;
+    mapHeight = dims.height;
+    pinRadius = dims.pinRadius;
+
+    barrierMap = drawBaseMap(baseCanvas, img);
+
+    // Fetch marks from Supabase
+    const { data: supaMarks, error } = await loadMarks(proj.id);
+    if (!error && supaMarks && supaMarks.length > 0) {
+      marks = supaMarks
+        .map((row) => {
+          const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+          const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+          const m: Mark = {
+            id: row.id,
+            t: row.kind === 'pin' ? 'p' : 'f',
+            x: px,
+            y: py,
+            s: row.status,
+          };
+          if (m.t === 'f') {
+            const spans = region(px, py, mapWidth, mapHeight, barrierMap!);
+            if (spans) m.sp = spans;
+          }
+          return m;
+        })
+        .filter((m) => m.t === 'p' || m.sp);
+
+      saveState();
+    } else {
+      // Fallback to local storage if empty or offline
+      try {
+        const raw = localStorage.getItem(getStorageKey());
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          marks = Array.isArray(parsed) ? parsed : parsed.marks || [];
+          if (parsed && parsed.lg) {
+            legendPos = parsed.lg;
+          }
+        }
+      } catch {
+        // Ignore storage parse errors
+      }
+
+      marks = marks.filter((m) => {
+        if (m.t === 'p') return true;
+        const spans = region(m.x, m.y, mapWidth, mapHeight, barrierMap!);
+        if (spans) {
+          m.sp = spans;
+          return true;
+        }
+        return false;
+      });
+    }
+
+    loadingIndicator.style.display = 'none';
+    stage.scrollTo(0, 0);
+    setZoom(0);
+    renderAll();
+  } catch (err) {
+    console.error('Failed to load project map:', err);
+    loadingIndicator.textContent = 'Failed to load map.';
+  }
+}
+
 // 5. Event Listeners
 // Canvas click for painting, erasing, pinning, moving legend
 box.addEventListener('click', async (e: MouseEvent) => {
@@ -511,10 +596,21 @@ renderChips(chipsContainer, statuses, currentStatus, {
   },
 });
 
-// Populate map selector and load initial map
-initMapSelector(mapSelect, MAPS, currentMapIndex, (newIndex) => {
-  openMap(newIndex);
-});
+// Initialize project list (loads from Supabase if projects exist, else falls back to local MAPS)
+async function initProjectList(): Promise<void> {
+  const { data: projects, error } = await loadProjects();
+  if (!error && projects && projects.length > 0) {
+    populateProjectSelect(mapSelect, projects, projects[0].id, (selectedProj) => {
+      openProject(selectedProj);
+    });
+    await openProject(projects[0]);
+  } else {
+    initMapSelector(mapSelect, MAPS, currentMapIndex, (newIndex) => {
+      openMap(newIndex);
+    });
+    await openMap(currentMapIndex);
+  }
+}
 
 // Initialize Auth UI
 if (authModal && authForm && authEmail && authPassword && authError && authBtn) {
@@ -529,11 +625,10 @@ if (authModal && authForm && authEmail && authPassword && authError && authBtn) 
       cancelButton: authCancel,
     },
     {
-      onLogin: (user) => {
+      onLogin: async (user) => {
         currentUser = user;
         showToast(toastElement, `Signed in as ${user.email}`);
-        // Reload map marks from Supabase now that we are authenticated
-        openMap(currentMapIndex);
+        await initProjectList();
       },
       onSignOut: () => {
         currentUser = null;
@@ -543,5 +638,5 @@ if (authModal && authForm && authEmail && authPassword && authError && authBtn) 
   );
 }
 
-// Initial map load
-openMap(currentMapIndex);
+// Initial project / map load
+initProjectList();

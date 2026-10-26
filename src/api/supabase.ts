@@ -37,30 +37,110 @@ export interface MarkHistory {
   changed_at: string;
 }
 
-// Supabase Database generic schema mapping
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
+// Standard Supabase generic Database schema
 export interface Database {
   public: {
     Tables: {
       profiles: {
         Row: Profile;
-        Insert: Partial<Omit<Profile, 'id'>> & { id: string };
-        Update: Partial<Profile>;
+        Insert: {
+          id: string;
+          display_name?: string | null;
+          role?: 'admin' | 'editor' | 'viewer';
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          display_name?: string | null;
+          role?: 'admin' | 'editor' | 'viewer';
+          created_at?: string;
+        };
+        Relationships: [];
       };
       projects: {
         Row: Project;
-        Insert: Omit<Project, 'id' | 'created_at'> & { id?: string; created_at?: string };
-        Update: Partial<Project>;
+        Insert: {
+          id?: string;
+          name: string;
+          map_url: string;
+          legend_x?: number;
+          legend_y?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          map_url?: string;
+          legend_x?: number;
+          legend_y?: number;
+          created_at?: string;
+        };
+        Relationships: [];
       };
       marks: {
         Row: MarkRow;
-        Insert: Omit<MarkRow, 'id' | 'updated_at'> & { id?: string; updated_at?: string };
-        Update: Partial<MarkRow>;
+        Insert: {
+          id?: string;
+          project_id: string;
+          x: number;
+          y: number;
+          status: string;
+          kind?: 'fill' | 'pin';
+          updated_by?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          x?: number;
+          y?: number;
+          status?: string;
+          kind?: 'fill' | 'pin';
+          updated_by?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       mark_history: {
         Row: MarkHistory;
-        Insert: Omit<MarkHistory, 'id' | 'changed_at'> & { id?: number; changed_at?: string };
-        Update: Partial<MarkHistory>;
+        Insert: {
+          id?: number;
+          mark_id?: string | null;
+          old_status?: string | null;
+          new_status?: string | null;
+          changed_by?: string | null;
+          changed_at?: string;
+        };
+        Update: {
+          id?: number;
+          mark_id?: string | null;
+          old_status?: string | null;
+          new_status?: string | null;
+          changed_by?: string | null;
+          changed_at?: string;
+        };
+        Relationships: [];
       };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
     };
   };
 }
@@ -75,4 +155,4 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

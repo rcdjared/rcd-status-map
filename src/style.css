@@ -285,7 +285,7 @@ body.role-viewer .chip input[type="color"] {
 }
 
 .modal-logo {
-  max-height: 48px;
+  max-height: 80px;
   max-width: 180px;
   width: auto;
   object-fit: contain;

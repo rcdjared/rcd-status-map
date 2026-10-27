@@ -38,6 +38,41 @@ export function hit(m: Mark, x: number, y: number, pinRadius: number): boolean {
 }
 
 /**
+ * Returns the current legend box bounds so it can be dragged or hit-tested.
+ */
+export function getLegendBounds(
+  legendPos: [number, number],
+  statuses: StatusMap,
+  counts: Record<string, number>,
+  width: number,
+  height: number
+): { x: number; y: number; w: number; h: number } {
+  const fs = Math.round(width * 0.0092);
+  const x0 = width * legendPos[0];
+  const y0 = height * legendPos[1];
+  const entries = Object.keys(statuses);
+  const itemMeta = entries.map((k) => {
+    const text = `${statuses[k].n} (${counts[k] || 0})`;
+    return {
+      key: k,
+      text,
+      width: text.length * fs * 0.58 + fs * 3.4,
+    };
+  });
+
+  const totalTextWidth = itemMeta.reduce((sum, item) => sum + item.width + fs * 0.45, 0);
+  const boxWidth = Math.max(fs * 22, totalTextWidth + fs * 1.6);
+  const boxHeight = fs * 3.9;
+
+  return {
+    x: x0,
+    y: y0,
+    w: boxWidth,
+    h: boxHeight,
+  };
+}
+
+/**
  * Renders the status legend box onto the given canvas context.
  */
 export function drawLegend(
@@ -51,12 +86,25 @@ export function drawLegend(
   const fs = Math.round(width * 0.0092);
   const x0 = width * legendPos[0];
   const y0 = height * legendPos[1];
+  const entries = Object.keys(statuses);
+  const itemMeta = entries.map((k) => {
+    const text = `${statuses[k].n} (${counts[k] || 0})`;
+    return {
+      key: k,
+      text,
+      width: text.length * fs * 0.58 + fs * 3.4,
+    };
+  });
+
+  const totalTextWidth = itemMeta.reduce((sum, item) => sum + item.width + fs * 0.45, 0);
+  const boxWidth = Math.max(fs * 22, totalTextWidth + fs * 1.6);
+  const boxHeight = fs * 3.9;
 
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#888';
   ctx.lineWidth = 3;
-  ctx.fillRect(x0, y0, fs * 29, fs * 4.6);
-  ctx.strokeRect(x0, y0, fs * 29, fs * 4.6);
+  ctx.fillRect(x0, y0, boxWidth, boxHeight);
+  ctx.strokeRect(x0, y0, boxWidth, boxHeight);
 
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#222';
@@ -67,15 +115,16 @@ export function drawLegend(
     month: 'long',
     day: 'numeric',
   });
-  ctx.fillText('Status update as of ' + dateStr, x0 + fs * 0.8, y0 + fs * 1.1);
+  ctx.fillText('Status update as of ' + dateStr, x0 + fs * 0.55, y0 + fs * 1.05);
 
-  Object.keys(statuses).forEach((k, i) => {
-    const px = x0 + fs * (0.8 + 8.8 * i);
-    const py = y0 + fs * 3.3;
-    ctx.fillStyle = statuses[k].c;
-    ctx.fillRect(px, py - fs * 0.5, fs, fs);
+  let cursor = x0 + fs * 0.55;
+  itemMeta.forEach(({ key, text, width }) => {
+    const py = y0 + fs * 2.85;
+    ctx.fillStyle = statuses[key].c;
+    ctx.fillRect(cursor, py - fs * 0.45, fs, fs);
     ctx.fillStyle = '#222';
-    ctx.fillText(`${statuses[k].n} (${counts[k] || 0})`, px + fs * 1.4, py);
+    ctx.fillText(text, cursor + fs * 1.1, py);
+    cursor += width + fs * 0.45;
   });
 }
 

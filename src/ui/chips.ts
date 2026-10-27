@@ -3,6 +3,9 @@ import type { StatusMap } from '../map/painting';
 export interface ChipCallbacks {
   onSelect: (key: string) => void;
   onColorChange: (key: string, color: string) => void;
+  onRename: (key: string) => void;
+  onRemove: (key: string) => void;
+  onAdd: () => void;
 }
 
 /**
@@ -77,9 +80,31 @@ export function renderChips(
     const count = document.createElement('b');
     count.textContent = '0';
 
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.className = 'chip-action';
+    renameBtn.title = 'Rename status';
+    renameBtn.textContent = '✎';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'chip-action danger';
+    removeBtn.title = 'Remove status';
+    removeBtn.textContent = '×';
+
     input.addEventListener('input', (e) => {
       e.stopPropagation();
       callbacks.onColorChange(key, input.value);
+    });
+
+    renameBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      callbacks.onRename(key);
+    });
+
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      callbacks.onRemove(key);
     });
 
     chip.addEventListener('click', () => {
@@ -89,8 +114,17 @@ export function renderChips(
     chip.appendChild(input);
     chip.appendChild(label);
     chip.appendChild(count);
+    chip.appendChild(renameBtn);
+    chip.appendChild(removeBtn);
     container.appendChild(chip);
   }
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'chip chip-add';
+  addBtn.textContent = '+ Add status';
+  addBtn.addEventListener('click', () => callbacks.onAdd());
+  container.appendChild(addBtn);
 
   selectChip(container, activeKey, statuses);
 }

@@ -152,6 +152,24 @@
     <div id="users-view" style="display: none;"></div>
   </div>
 
+  <div id="legend-editor-backdrop" class="legend-editor-backdrop hidden" aria-hidden="true">
+    <div class="legend-editor-modal" role="dialog" aria-modal="true" aria-labelledby="legend-editor-title">
+      <h3 id="legend-editor-title">Add status category</h3>
+      <div class="legend-editor-field">
+        <label for="legend-name-input">Label</label>
+        <input id="legend-name-input" type="text" maxlength="28" placeholder="e.g. Completed" />
+      </div>
+      <div class="legend-editor-field">
+        <label for="legend-color-input">Color</label>
+        <input id="legend-color-input" type="color" value="#1f9d55" />
+      </div>
+      <div class="legend-editor-actions">
+        <button type="button" id="legend-cancel-btn" class="btn-secondary">Cancel</button>
+        <button type="button" id="legend-save-btn" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="t"></div>
 
   <script type="module" src="/src/main.ts"></script>

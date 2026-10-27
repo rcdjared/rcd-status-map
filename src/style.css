@@ -209,6 +209,120 @@ small {
   font-variant-numeric: tabular-nums;
 }
 
+.chip-action {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--bd);
+  color: var(--tx);
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+}
+
+.chip-action.danger {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+.chip-add {
+  padding-inline: 14px;
+  font-weight: 600;
+  color: var(--brand-green);
+  border-style: dashed;
+}
+
+.legend-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+}
+
+.legend-editor-backdrop.hidden {
+  display: none;
+}
+
+.legend-editor-modal {
+  width: min(420px, calc(100vw - 28px));
+  background: var(--sf);
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.legend-editor-modal h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--tx);
+}
+
+.legend-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-editor-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mu);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.legend-editor-field input[type='text'] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  color: var(--tx);
+}
+
+.legend-editor-field input[type='color'] {
+  width: 52px;
+  height: 40px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: transparent;
+  padding: 4px;
+}
+
+.legend-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+
+.btn-primary {
+  background: var(--brand-green);
+  border-color: var(--brand-green);
+  color: white;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--tx);
+}
+
 button {
   font: inherit;
   color: inherit;

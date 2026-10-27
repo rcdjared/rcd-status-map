@@ -21,6 +21,7 @@ import { region } from './map/flood-fill';
 import {
   DEFAULT_STATUSES,
   drawMarks,
+  getLegendBounds,
   handleMapClick,
   type Mark,
   type PaintMode,
@@ -100,6 +101,12 @@ const tabSignIn = document.querySelector<HTMLElement>('#tab-signin');
 const tabSignUp = document.querySelector<HTMLElement>('#tab-signup');
 const authSubmitBtn = document.querySelector<HTMLButtonElement>('#auth-submit-btn');
 
+const legendBackdrop = document.querySelector<HTMLElement>('#legend-editor-backdrop');
+const legendNameInput = document.querySelector<HTMLInputElement>('#legend-name-input');
+const legendColorInput = document.querySelector<HTMLInputElement>('#legend-color-input');
+const legendCancelBtn = document.querySelector<HTMLButtonElement>('#legend-cancel-btn');
+const legendSaveBtn = document.querySelector<HTMLButtonElement>('#legend-save-btn');
+
 // State
 const COLOR_STORAGE_KEY = 'rrh-colors-v1';
 const statuses: StatusMap = {
@@ -107,6 +114,10 @@ const statuses: StatusMap = {
   o: { ...DEFAULT_STATUSES.o },
   a: { ...DEFAULT_STATUSES.a },
 };
+
+let legendEditorMode: 'add' | 'edit' = 'add';
+let legendEditorKey: string | null = null;
+let legendStatusNextIndex = 0;
 
 let currentUser: User | null = null;
 let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
@@ -138,6 +149,10 @@ let dragStartY = 0;
 let initialPanX = 0;
 let initialPanY = 0;
 let pointerMoved = false;
+let activePointerId: number | null = null;
+let isDraggingLegend = false;
+let legendDragOffsetX = 0;
+let legendDragOffsetY = 0;
 
 // Navigation view switching
 function switchToMap(): void {
@@ -183,11 +198,14 @@ function getStorageKey(): string {
 function saveState(): void {
   try {
     const serializedMarks = marks.map(({ id, t, x, y, s }) => ({ id, t, x, y, s }));
-    localStorage.setItem(getStorageKey(), JSON.stringify({ marks: serializedMarks, lg: legendPos }));
-    const savedColors = Object.fromEntries(
-      Object.entries(statuses).map(([k, v]) => [k, v.c])
+    const savedStatuses = Object.fromEntries(
+      Object.entries(statuses).map(([k, v]) => [k, { n: v.n, c: v.c }])
     );
-    localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(savedColors));
+    localStorage.setItem(
+      getStorageKey(),
+      JSON.stringify({ marks: serializedMarks, lg: legendPos, statuses: savedStatuses })
+    );
+    localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(savedStatuses));
   } catch {
     // Ignore storage quota errors
   }
@@ -258,6 +276,10 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   // If user was viewing users panel and got demoted, redirect back to map
   if (!isAdmin && usersView && usersView.style.display !== 'none') {
     switchToMap();
+  }
+
+  if (!isAdmin && !isEditor) {
+    setMode('fill');
   }
 
   // Update user capsule
@@ -360,6 +382,12 @@ function renderAll(): void {
     pinRadius
   );
   updateChipCounts(chipsContainer, counts);
+  selectChip(chipsContainer, currentStatus, statuses);
+}
+
+function refreshStatusUi(): void {
+  renderAll();
+  selectChip(chipsContainer, currentStatus, statuses);
 }
 
 function fitAndCenterMap(): void {
@@ -411,7 +439,7 @@ async function undo(): Promise<void> {
   if (history.length > 0) {
     const previousMarks = marks;
     marks = history.pop()!;
-    renderAll();
+    refreshStatusUi();
     saveState();
 
     // If a mark was removed by undo, delete it from Supabase as well
@@ -432,6 +460,105 @@ function setStatus(key: string): void {
     currentStatus = key;
     selectChip(chipsContainer, currentStatus, statuses);
   }
+}
+
+function generateStatusKey(): string {
+  let key = `s${legendStatusNextIndex}`;
+  while (statuses[key]) {
+    key = `s${++legendStatusNextIndex}`;
+  }
+  legendStatusNextIndex += 1;
+  return key;
+}
+
+function closeLegendEditor(): void {
+  if (legendBackdrop) {
+    legendBackdrop.classList.add('hidden');
+    legendBackdrop.setAttribute('aria-hidden', 'true');
+  }
+  legendEditorMode = 'add';
+  legendEditorKey = null;
+  if (legendNameInput) legendNameInput.value = '';
+  if (legendColorInput) legendColorInput.value = '#1f9d55';
+}
+
+function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void {
+  legendEditorMode = mode;
+  legendEditorKey = key;
+
+  if (legendBackdrop) {
+    legendBackdrop.classList.remove('hidden');
+    legendBackdrop.setAttribute('aria-hidden', 'false');
+  }
+
+  if (mode === 'edit' && key && statuses[key]) {
+    if (legendNameInput) legendNameInput.value = statuses[key].n;
+    if (legendColorInput) legendColorInput.value = statuses[key].c;
+  } else {
+    if (legendNameInput) legendNameInput.value = '';
+    if (legendColorInput) legendColorInput.value = '#1f9d55';
+  }
+
+  requestAnimationFrame(() => {
+    legendNameInput?.focus();
+    legendNameInput?.select();
+  });
+}
+
+function persistStatuses(): void {
+  saveState();
+  renderChips(chipsContainer, statuses, currentStatus, {
+    onSelect: (key) => setStatus(key),
+    onColorChange: (key, newColor) => {
+      if (statuses[key]) {
+        statuses[key].c = newColor;
+        if (key === currentStatus) {
+          selectChip(chipsContainer, currentStatus, statuses);
+        }
+        renderAll();
+        saveState();
+      }
+    },
+    onRename: (key) => openLegendEditor('edit', key),
+    onRemove: (key) => {
+      if (Object.keys(statuses).length <= 1) {
+        showToast(toastElement, 'At least one status category is required.');
+        return;
+      }
+      const nextKey = Object.keys(statuses).find((candidate) => candidate !== key) || key;
+      delete statuses[key];
+      if (currentStatus === key) {
+        currentStatus = nextKey;
+      }
+      renderChips(chipsContainer, statuses, currentStatus, {
+        onSelect: (chipKey) => setStatus(chipKey),
+        onColorChange: (chipKey, newColor) => {
+          if (statuses[chipKey]) {
+            statuses[chipKey].c = newColor;
+            renderAll();
+            saveState();
+          }
+        },
+        onRename: (chipKey) => openLegendEditor('edit', chipKey),
+        onRemove: (chipKey) => {
+          if (Object.keys(statuses).length <= 1) {
+            showToast(toastElement, 'At least one status category is required.');
+            return;
+          }
+          const fallback = Object.keys(statuses).find((candidate) => candidate !== chipKey) || chipKey;
+          delete statuses[chipKey];
+          if (currentStatus === chipKey) {
+            currentStatus = fallback;
+          }
+          persistStatuses();
+        },
+        onAdd: () => openLegendEditor('add'),
+      });
+      renderAll();
+      saveState();
+    },
+    onAdd: () => openLegendEditor('add'),
+  });
 }
 
 function setMode(mode: PaintMode): void {
@@ -693,10 +820,7 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
   if (result.actionTaken) {
     snapshot();
     marks = result.updatedMarks;
-    renderAll();
-    saveState();
-
-    // If an existing mark was erased or replaced, delete it from Supabase
+      refreshStatusUi();
     if (currentUser && result.erasedMark?.id) {
       deleteMark(result.erasedMark.id).catch((err) =>
         console.warn('Supabase deleteMark error:', err)
@@ -744,10 +868,34 @@ stage.addEventListener('click', async (e: MouseEvent) => {
   }
 });
 
-// Drag to Pan in ALL directions (left, right, up, down, diagonally)
-let activePointerId: number | null = null;
-
 stage.addEventListener('pointerdown', (e: PointerEvent) => {
+  if (currentMode === 'lg' && mapWidth && mapHeight) {
+    const { x, y } = screenToMapCoords(e.clientX, e.clientY, box, mapWidth, mapHeight);
+    const bounds = getLegendBounds(legendPos, statuses, (() => {
+      const counts: Record<string, number> = {};
+      for (const key of Object.keys(statuses)) counts[key] = 0;
+      for (const mark of marks) {
+        if (mark.t === 'f' && counts[mark.s] !== undefined) counts[mark.s]++;
+      }
+      return counts;
+    })(), mapWidth, mapHeight);
+
+    const hitLegend =
+      x >= bounds.x &&
+      x <= bounds.x + bounds.w &&
+      y >= bounds.y &&
+      y <= bounds.y + bounds.h;
+
+    if (hitLegend) {
+      isDraggingLegend = true;
+      pointerMoved = true;
+      legendDragOffsetX = x - bounds.x;
+      legendDragOffsetY = y - bounds.y;
+      e.preventDefault();
+      return;
+    }
+  }
+
   if (e.button !== 0 && e.button !== 1) return;
   isDragging = true;
   pointerMoved = false;
@@ -759,6 +907,16 @@ stage.addEventListener('pointerdown', (e: PointerEvent) => {
 });
 
 window.addEventListener('pointermove', (e: PointerEvent) => {
+  if (isDraggingLegend && mapWidth && mapHeight) {
+    const { x, y } = screenToMapCoords(e.clientX, e.clientY, box, mapWidth, mapHeight);
+    const nextX = Math.min(Math.max((x - legendDragOffsetX) / mapWidth, 0), 0.73);
+    const nextY = Math.min(Math.max((y - legendDragOffsetY) / mapHeight, 0.06), 0.935);
+    legendPos = [nextX, nextY];
+    renderAll();
+    saveState();
+    return;
+  }
+
   if (!isDragging) return;
   const dx = e.clientX - dragStartX;
   const dy = e.clientY - dragStartY;
@@ -781,6 +939,13 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
 });
 
 const handlePointerUp = () => {
+  if (isDraggingLegend) {
+    isDraggingLegend = false;
+    legendDragOffsetX = 0;
+    legendDragOffsetY = 0;
+    return;
+  }
+
   if (!isDragging) return;
   isDragging = false;
   if (activePointerId !== null) {
@@ -942,7 +1107,7 @@ initActionButtons(
         }
 
         marks = [];
-        renderAll();
+        refreshStatusUi();
         saveState();
       }
     },
@@ -985,7 +1150,7 @@ initActionButtons(
 );
 
 // Keyboard Shortcuts (Ctrl+Z, 1 2 3 status, F/P/E modes)
-const statusKeys = ['c', 'o', 'a'];
+const getStatusKeys = (): string[] => Object.keys(statuses);
 initKeyboardShortcuts({
   onUndo: () => {
     if (currentUserRole === 'admin' || currentUserRole === 'editor') {
@@ -993,6 +1158,7 @@ initKeyboardShortcuts({
     }
   },
   onSelectStatusIndex: (index) => {
+    const statusKeys = getStatusKeys();
     if ((currentUserRole === 'admin' || currentUserRole === 'editor') && statusKeys[index]) {
       setStatus(statusKeys[index]);
     }
@@ -1009,10 +1175,11 @@ initTheme();
 
 // 6. Initialize App
 try {
-  const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
-  for (const k in savedColors) {
+  const savedStatuses = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
+  for (const k in savedStatuses) {
     if (statuses[k]) {
-      statuses[k].c = savedColors[k];
+      statuses[k].n = savedStatuses[k].n || statuses[k].n;
+      statuses[k].c = savedStatuses[k].c || statuses[k].c;
     }
   }
   const lastMapId = localStorage.getItem('rrh-last');
@@ -1023,16 +1190,36 @@ try {
 }
 
 // Render status chips
-renderChips(chipsContainer, statuses, currentStatus, {
-  onSelect: (key) => setStatus(key),
-  onColorChange: (key, newColor) => {
-    if (statuses[key]) {
-      statuses[key].c = newColor;
-      setStatus(currentStatus);
-      renderAll();
-      saveState();
-    }
-  },
+persistStatuses();
+
+legendCancelBtn?.addEventListener('click', closeLegendEditor);
+legendBackdrop?.addEventListener('click', (event) => {
+  if (event.target === legendBackdrop) {
+    closeLegendEditor();
+  }
+});
+legendSaveBtn?.addEventListener('click', () => {
+  const name = legendNameInput?.value.trim() || '';
+  const color = legendColorInput?.value || '#1f9d55';
+  if (!name) {
+    showToast(toastElement, 'Add a status label before saving.');
+    return;
+  }
+
+  if (legendEditorMode === 'edit' && legendEditorKey && statuses[legendEditorKey]) {
+    statuses[legendEditorKey].n = name;
+    statuses[legendEditorKey].c = color;
+    currentStatus = legendEditorKey;
+  } else {
+    const newKey = generateStatusKey();
+    statuses[newKey] = { n: name, c: color };
+    currentStatus = newKey;
+  }
+
+  persistStatuses();
+  closeLegendEditor();
+  refreshStatusUi();
+  saveState();
 });
 
 // Initialize project list (loads from Supabase if projects exist, else falls back to local MAPS)

@@ -30,7 +30,15 @@ import {
 
 // 4. API & UI functions
 import type { User } from '@supabase/supabase-js';
-import { supabase, getUserRole, type Project } from './api/supabase';
+import {
+  supabase,
+  getUserRole,
+  loadProjectStatusConfig,
+  saveProjectStatusConfig,
+  subscribeToProjectStatusConfig,
+  type Project,
+  type ProjectStatusConfig,
+} from './api/supabase';
 import { loadMarks, saveMark, deleteMark, clearAllMarks, subscribeToMarks } from './api/marks';
 import { loadProjects, loadProjectMapImage, populateProjectSelect } from './api/projects';
 import {
@@ -124,6 +132,7 @@ let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
 let currentProjectId: string | null = null;
 let currentProject: Project | null = null;
 let marksSubscriptionCleanup: (() => void) | null = null;
+let projectStatusSubscriptionCleanup: (() => void) | null = null;
 let usersManager: ReturnType<typeof initUsersManagement> | null = null;
 
 let currentMapIndex = 0;
@@ -209,6 +218,44 @@ function saveState(): void {
   } catch {
     // Ignore storage quota errors
   }
+}
+
+function applyStatusConfig(config: ProjectStatusConfig | null): void {
+  if (!config || typeof config !== 'object') return;
+
+  const merged = { ...DEFAULT_STATUSES, ...config };
+  for (const key of Object.keys(statuses)) {
+    delete (statuses as Record<string, { n: string; c: string } >)[key];
+  }
+  Object.assign(statuses, merged);
+
+  const currentKeyExists = currentStatus && Object.prototype.hasOwnProperty.call(merged, currentStatus);
+  if (!currentKeyExists) {
+    currentStatus = Object.keys(merged)[0] || 'c';
+  }
+
+  renderChips(chipsContainer, statuses, currentStatus, {
+    onSelect: (key) => setStatus(key),
+    onColorChange: (key, newColor) => {
+      if (statuses[key]) {
+        statuses[key].c = newColor;
+        renderAll();
+        saveState();
+      }
+    },
+    onRename: (key) => openLegendEditor('edit', key),
+    onRemove: (key) => {
+      if (Object.keys(statuses).length <= 1) {
+        showToast(toastElement, 'At least one status category is required.');
+        return;
+      }
+      const fallbackKey = Object.keys(statuses).find((candidate) => candidate !== key) || key;
+      delete statuses[key];
+      if (currentStatus === key) currentStatus = fallbackKey;
+      persistStatuses();
+    },
+    onAdd: () => openLegendEditor('add'),
+  });
 }
 
 function snapshot(): void {
@@ -297,6 +344,18 @@ function setupRealtimeForCurrentProject(projectId: string): void {
     marksSubscriptionCleanup();
     marksSubscriptionCleanup = null;
   }
+
+  if (projectStatusSubscriptionCleanup) {
+    projectStatusSubscriptionCleanup();
+    projectStatusSubscriptionCleanup = null;
+  }
+
+  projectStatusSubscriptionCleanup = subscribeToProjectStatusConfig(projectId, (config) => {
+    if (!config) return;
+    applyStatusConfig(config);
+    renderAll();
+    saveState();
+  });
 
   marksSubscriptionCleanup = subscribeToMarks(projectId, (change) => {
     if (!mapWidth || !mapHeight || !barrierMap) return;
@@ -505,8 +564,20 @@ function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void
   });
 }
 
-function persistStatuses(): void {
+async function persistStatuses(): Promise<void> {
+  const savedStatuses = Object.fromEntries(
+    Object.entries(statuses).map(([k, v]) => [k, { n: v.n, c: v.c }])
+  );
+
   saveState();
+
+  if (currentProjectId && (currentUserRole === 'admin' || currentUserRole === 'editor')) {
+    const { error } = await saveProjectStatusConfig(currentProjectId, savedStatuses);
+    if (error) {
+      console.warn('Project status sync failed:', error.message);
+    }
+  }
+
   renderChips(chipsContainer, statuses, currentStatus, {
     onSelect: (key) => setStatus(key),
     onColorChange: (key, newColor) => {
@@ -516,7 +587,7 @@ function persistStatuses(): void {
           selectChip(chipsContainer, currentStatus, statuses);
         }
         renderAll();
-        saveState();
+        persistStatuses();
       }
     },
     onRename: (key) => openLegendEditor('edit', key),
@@ -536,7 +607,7 @@ function persistStatuses(): void {
           if (statuses[chipKey]) {
             statuses[chipKey].c = newColor;
             renderAll();
-            saveState();
+            persistStatuses();
           }
         },
         onRename: (chipKey) => openLegendEditor('edit', chipKey),
@@ -555,7 +626,7 @@ function persistStatuses(): void {
         onAdd: () => openLegendEditor('add'),
       });
       renderAll();
-      saveState();
+      persistStatuses();
     },
     onAdd: () => openLegendEditor('add'),
   });
@@ -623,6 +694,11 @@ async function openMap(index: number): Promise<void> {
 
     // 2. If project ID resolved, attempt to load marks from Supabase
     if (currentProjectId) {
+      const projectStatusConfig = await loadProjectStatusConfig(currentProjectId);
+      if (projectStatusConfig) {
+        applyStatusConfig(projectStatusConfig);
+      }
+
       const { data: supaMarks, error } = await loadMarks(currentProjectId);
       if (!error && supaMarks && supaMarks.length > 0) {
         loadedFromSupabase = true;
@@ -713,6 +789,11 @@ async function openProject(proj: Project): Promise<void> {
     pinRadius = dims.pinRadius;
 
     barrierMap = drawBaseMap(baseCanvas, img);
+
+    const projectStatusConfig = await loadProjectStatusConfig(proj.id);
+    if (projectStatusConfig) {
+      applyStatusConfig(projectStatusConfig);
+    }
 
     // Fetch marks from Supabase
     const { data: supaMarks, error } = await loadMarks(proj.id);
@@ -820,11 +901,15 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
   if (result.actionTaken) {
     snapshot();
     marks = result.updatedMarks;
-      refreshStatusUi();
+    refreshStatusUi();
+
     if (currentUser && result.erasedMark?.id) {
-      deleteMark(result.erasedMark.id).catch((err) =>
-        console.warn('Supabase deleteMark error:', err)
-      );
+      const { error } = await deleteMark(result.erasedMark.id);
+      if (error) {
+        console.warn('Supabase deleteMark error:', error.message);
+      } else {
+        saveState();
+      }
     }
 
     // If a new mark was placed or filled, save it to Supabase

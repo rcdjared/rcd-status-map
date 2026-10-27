@@ -8,12 +8,20 @@ export interface Profile {
   created_at: string;
 }
 
+export interface ProjectStatusConfig {
+  [key: string]: {
+    n: string;
+    c: string;
+  };
+}
+
 export interface Project {
   id: string;
   name: string;
   map_url: string;
   legend_x: number;
   legend_y: number;
+  status_config?: ProjectStatusConfig | null;
   created_at: string;
 }
 
@@ -73,6 +81,7 @@ export interface Database {
           map_url: string;
           legend_x?: number;
           legend_y?: number;
+          status_config?: ProjectStatusConfig | null;
           created_at?: string;
         };
         Update: {
@@ -81,6 +90,7 @@ export interface Database {
           map_url?: string;
           legend_x?: number;
           legend_y?: number;
+          status_config?: ProjectStatusConfig | null;
           created_at?: string;
         };
         Relationships: [];
@@ -178,4 +188,69 @@ export async function getUserRole(
   } catch {
     return 'viewer';
   }
+}
+
+export async function loadProjectStatusConfig(
+  projectId: string
+): Promise<ProjectStatusConfig | null> {
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('status_config')
+      .eq('id', projectId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return (data.status_config as ProjectStatusConfig | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveProjectStatusConfig(
+  projectId: string,
+  config: ProjectStatusConfig
+): Promise<{ error: Error | null }> {
+  try {
+    const { error } = await supabase
+      .from('projects')
+      .update({ status_config: config })
+      .eq('id', projectId);
+
+    if (error) {
+      return { error: new Error(error.message) };
+    }
+
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
+
+export function subscribeToProjectStatusConfig(
+  projectId: string,
+  onChange: (config: ProjectStatusConfig | null) => void
+): () => void {
+  const channel = supabase
+    .channel(`project-status:${projectId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'projects',
+        filter: `id=eq.${projectId}`,
+      },
+      (payload) => {
+        const nextConfig = ((payload.new as Project | null)?.status_config ?? null) as
+          | ProjectStatusConfig
+          | null;
+        onChange(nextConfig);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }

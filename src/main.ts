@@ -7,7 +7,6 @@ import { MAPS } from './map/data';
 // 3. Canvas and painting logic
 import {
   loadMap,
-  loadMapImage,
   setupCanvases,
   drawBaseMap,
   applyZoom,
@@ -32,7 +31,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { supabase, getUserRole, type Project } from './api/supabase';
 import { loadMarks, saveMark, deleteMark, clearAllMarks, subscribeToMarks } from './api/marks';
-import { loadProjects, populateProjectSelect } from './api/projects';
+import { loadProjects, loadProjectMapImage, populateProjectSelect } from './api/projects';
 import {
   initAuth,
   showAppScreen,
@@ -578,7 +577,7 @@ async function openProject(proj: Project): Promise<void> {
   legendPos = [proj.legend_x ?? 0.5, proj.legend_y ?? 0.5];
 
   try {
-    const img = await loadMapImage(proj.map_url);
+    const img = await loadProjectMapImage(proj.map_url);
     if (thisToken !== mapToken) return;
 
     const dims = setupCanvases(canvases, img.width, img.height);
@@ -646,7 +645,11 @@ async function openProject(proj: Project): Promise<void> {
     renderAll();
   } catch (err) {
     console.error('Failed to load project map:', err);
-    loadingIndicator.textContent = 'Failed to load map.';
+    const message = err instanceof Error ? err.message : 'Failed to load map.';
+    loadingIndicator.textContent =
+      message.includes('tainted') || message.includes('SecurityError')
+        ? 'Failed to load map (cross-origin image).'
+        : 'Failed to load map.';
   }
 }
 

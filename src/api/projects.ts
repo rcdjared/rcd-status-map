@@ -1,4 +1,5 @@
 import { supabase, type Project } from './supabase';
+import { loadMapImage } from '../map/canvas';
 import type { ApiResponse } from './marks';
 
 const LOCAL_CUSTOM_PROJECTS_KEY = 'rrh-custom-projects-v1';
@@ -188,6 +189,42 @@ export async function deleteProject(projectId: string): Promise<ApiResponse<void
       error: err instanceof Error ? err : new Error(String(err)),
     };
   }
+}
+
+function storagePathFromMapUrl(mapUrl: string): string | null {
+  const markers = [
+    '/storage/v1/object/public/maps/',
+    '/storage/v1/object/sign/maps/',
+    '/storage/v1/object/authenticated/maps/',
+  ];
+  for (const marker of markers) {
+    const idx = mapUrl.indexOf(marker);
+    if (idx !== -1) {
+      return decodeURIComponent(mapUrl.slice(idx + marker.length).split('?')[0]);
+    }
+  }
+  return null;
+}
+
+/**
+ * Loads a project map so the canvas is not tainted by a cross-origin storage URL.
+ * Prefers a same-origin blob from Storage download, then falls back to URL fetch.
+ */
+export async function loadProjectMapImage(mapUrl: string): Promise<HTMLImageElement> {
+  const path = storagePathFromMapUrl(mapUrl);
+  if (path) {
+    const { data, error } = await supabase.storage.from('maps').download(path);
+    if (!error && data) {
+      const objectUrl = URL.createObjectURL(data);
+      try {
+        return await loadMapImage(objectUrl);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+  }
+
+  return loadMapImage(mapUrl);
 }
 
 /**

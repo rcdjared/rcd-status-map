@@ -21,16 +21,57 @@ export interface PanDragState {
   moved: boolean;
 }
 
-/**
- * Loads a map image asynchronously by URL.
- */
-export function loadMapImage(src: string): Promise<HTMLImageElement> {
+function decodeImage(src: string, crossOrigin?: 'anonymous'): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    if (crossOrigin) {
+      img.crossOrigin = crossOrigin;
+    }
     img.onload = () => resolve(img);
-    img.onerror = (err) => reject(err);
+    img.onerror = () => reject(new Error('Failed to decode map image'));
     img.src = src;
   });
+}
+
+/**
+ * Loads a map image so it can be drawn and then read with getImageData.
+ * Remote URLs are fetched as blobs first; otherwise the canvas is tainted by
+ * cross-origin data and flood-fill / barrier detection throws a SecurityError.
+ */
+export async function loadMapImage(src: string): Promise<HTMLImageElement> {
+  if (!src) {
+    throw new Error('Map image URL is empty');
+  }
+
+  const isInline = src.startsWith('data:') || src.startsWith('blob:');
+  const isRemote = /^https?:\/\//i.test(src);
+
+  if (!isInline && isRemote) {
+    try {
+      const response = await fetch(src, { mode: 'cors', credentials: 'omit' });
+      if (!response.ok) {
+        throw new Error(`Map image request failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        return await decodeImage(objectUrl);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (fetchErr) {
+      // Host may still send ACAO on <img> even if fetch CORS failed.
+      try {
+        return await decodeImage(src, 'anonymous');
+      } catch {
+        throw fetchErr instanceof Error
+          ? fetchErr
+          : new Error('Failed to load map image');
+      }
+    }
+  }
+
+  return decodeImage(src);
 }
 
 /**

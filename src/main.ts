@@ -777,7 +777,7 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
   }
 });
 
-const handlePointerUp = (e: PointerEvent) => {
+const handlePointerUp = () => {
   if (!isDragging) return;
   isDragging = false;
   if (activePointerId !== null) {

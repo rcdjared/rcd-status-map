@@ -1,5 +1,6 @@
 // 1. Styles
 import './style.css';
+import './redesign.css';
 
 // 2. Map data
 import { MAPS } from './map/data';

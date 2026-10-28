@@ -1,155 +1,142 @@
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.ico
-    " />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>RCD Status Map</title>
 </head>
-
 <body>
-  <!-- Landing / Auth Screen (Displayed by default when not signed in) -->
   <div id="auth-screen" class="auth-page">
-    <div class="auth-theme-bar">
-      <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
-        <span class="theme-btn-icon">☀️</span>
-        <span class="theme-btn-text">Light</span>
-      </button>
-    </div>
-    <div class="auth-card">
-      <div class="auth-card-header">
-        <img src="/src/assets/logo.png" alt="RCD Logo" class="auth-logo" />
-        <h1 class="auth-card-title">RCD Status Map</h1>
-        <p id="auth-subtitle" class="auth-card-subtitle">Sign in to view real-time subdivision lot availability</p>
+    <section class="auth-hero" style="--auth-hero-image: url('/src/assets/auth-hero.png')">
+      <div class="auth-hero-copy">
+        <img src="/src/assets/logo.png" alt="RCD logo" />
+        <h2>Your projects. One live map.</h2>
       </div>
-
-      <div class="auth-tabs">
-        <button type="button" id="tab-signin" class="auth-tab on">Sign In</button>
-        <button type="button" id="tab-signup" class="auth-tab">Sign Up</button>
+    </section>
+    <section class="auth-pane">
+      <div class="auth-theme-bar">
+        <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
+          <span class="theme-btn-icon">☀️</span><span class="theme-btn-text">Light</span>
+        </button>
       </div>
-
-      <div id="auth-error" class="auth-error"></div>
-      <div id="auth-success" class="auth-success"></div>
-
-      <form id="auth-form" class="auth-form-card">
-        <div class="form-group">
-          <label for="auth-email">Email Address</label>
-          <input type="email" id="auth-email" placeholder="name@company.com" required autocomplete="email" />
+      <div class="auth-card">
+        <div class="auth-card-header">
+          <img src="/src/assets/logo.png" alt="RCD Logo" class="auth-logo" />
+          <h1 class="auth-card-title">RCD Status Map</h1>
+          <p id="auth-subtitle" class="auth-card-subtitle">Sign in to view real-time subdivision lot availability</p>
         </div>
-        <div class="form-group">
-          <label for="auth-password">Password</label>
-          <input type="password" id="auth-password" placeholder="Enter password (min 6 characters)" required
-            autocomplete="current-password" minlength="6" />
+        <div class="auth-tabs">
+          <button type="button" id="tab-signin" class="auth-tab on">Sign In</button>
+          <button type="button" id="tab-signup" class="auth-tab">Sign Up</button>
         </div>
-        <button type="submit" id="auth-submit-btn" class="btn btn-primary auth-btn-block">Sign In</button>
-      </form>
-    </div>
+        <div id="auth-error" class="auth-error"></div>
+        <div id="auth-success" class="auth-success"></div>
+        <form id="auth-form" class="auth-form-card">
+          <div class="form-group">
+            <label for="auth-email">Email address</label>
+            <input type="email" id="auth-email" placeholder="name@company.com" required autocomplete="email" />
+          </div>
+          <div class="form-group">
+            <label for="auth-password">Password</label>
+            <input type="password" id="auth-password" placeholder="At least 6 characters" required
+              autocomplete="current-password" minlength="6" />
+          </div>
+          <button type="submit" id="auth-submit-btn" class="btn btn-primary auth-btn-block">Sign In</button>
+        </form>
+      </div>
+    </section>
   </div>
 
-  <!-- Disabled Account Screen -->
   <div id="disabled-screen" class="auth-page" style="display: none;">
-    <div class="auth-card text-center">
-      <div class="disabled-icon">⚠️</div>
-      <h2>Account Disabled</h2>
-      <p class="disabled-desc">Your account has been deactivated by an administrator. You do not have permission to view or edit map status data.</p>
-      <button type="button" id="disabled-signout-btn" class="btn btn-secondary">Sign Out</button>
+    <div class="auth-pane">
+      <div class="auth-card text-center">
+        <div class="disabled-icon">⚠️</div>
+        <h2>Account disabled</h2>
+        <p class="disabled-desc">An administrator has deactivated your account, so you can't view or edit map data.</p>
+        <button type="button" id="disabled-signout-btn" class="btn btn-secondary">Sign Out</button>
+      </div>
     </div>
   </div>
 
-  <!-- Main Application Wrapper (Visible only after authentication) -->
   <div id="app-root" style="display: none;">
-    <header>
-      <div class="header-top">
-        <div class="brand">
-          <img src="/src/assets/logo.png" alt="RCD Logo" class="brand-logo" />
-          <div class="brand-text">
-            <h1>RCD Status Map</h1>
-            <span id="role-badge" class="badge badge-viewer">Viewer View</span>
+    <aside class="rail">
+      <img src="/src/assets/logo.png" alt="RCD Logo" class="brand-logo" />
+      <nav class="nav-tabs" id="nav-tabs">
+        <button type="button" id="nav-map-btn" class="nav-tab on">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+            <line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line>
+          </svg>Map
+        </button>
+        <button type="button" id="nav-users-btn" class="nav-tab admin-only" style="display: none;">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>Users
+        </button>
+      </nav>
+      <div class="rail-foot">
+        <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
+          <span class="theme-btn-icon">☀️</span><span class="theme-btn-text">Light</span>
+        </button>
+        <div id="user-info-capsule" class="user-capsule" style="display: none;">
+          <span class="user-dot"></span>
+          <span id="user-email-display" class="user-email-text"></span>
+        </div>
+        <button id="auth-btn">Sign out</button>
+      </div>
+    </aside>
+    <section class="workspace">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1>RCD Status Map</h1>
+          <span id="role-badge" class="badge badge-viewer">Viewer View</span>
+        </div>
+        <div class="header-controls" id="header-controls">
+          <div class="map-select-group">
+            <select id="mp" aria-label="Select subdivision project"></select>
+            <button type="button" id="btn-upload-map" class="admin-only map-action-btn" title="Upload new map (PDF, PNG, JPG)" style="display: none;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg><span>Add map</span>
+            </button>
+            <button type="button" id="btn-delete-map" class="admin-only map-action-btn btn-danger-icon" title="Delete current map" style="display: none;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="g" id="chips"></div>
+          <div class="g" id="action-tools">
+            <button id="un" title="Undo (Ctrl+Z)">Undo</button>
+            <button id="cl" title="Clear all">Clear</button>
+            <button id="zo" title="Zoom out">−</button>
+            <button id="zi" title="Zoom in">+</button>
+            <button id="zf" title="Fit to screen">Fit</button>
+            <button id="png" title="Export PNG">Save PNG</button>
+          </div>
+          <div class="g" id="edit-tools">
+            <button data-m="fill" class="on" title="Paint lot (F)">Paint</button>
+            <button data-m="pin" title="Pin (P)">Pin</button>
+            <button data-m="erase" title="Erase (E)">Erase</button>
+            <button data-m="lg" title="Move legend">Legend</button>
           </div>
         </div>
-
-        <nav class="nav-tabs" id="nav-tabs">
-          <button type="button" id="nav-map-btn" class="nav-tab on">
-            <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="2">
-              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
-              <line x1="8" y1="2" x2="8" y2="18"></line>
-              <line x1="16" y1="6" x2="16" y2="22"></line>
-            </svg>
-            Map
-          </button>
-          <button type="button" id="nav-users-btn" class="nav-tab admin-only" style="display: none;">
-            <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-              <circle cx="9" cy="7" r="4"></circle>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-            </svg>
-            Manage Users
-          </button>
-        </nav>
-
-        <div class="user-profile-bar">
-          <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
-            <span class="theme-btn-icon">☀️</span>
-            <span class="theme-btn-text">Light</span>
-          </button>
-          <div id="user-info-capsule" class="user-capsule" style="display: none;">
-            <span class="user-dot"></span>
-            <span id="user-email-display" class="user-email-text"></span>
-          </div>
-          <button id="auth-btn">Sign Out</button>
+      </header>
+      <main id="stage">
+        <div id="box">
+          <canvas id="base"></canvas>
+          <canvas id="fill"></canvas>
+          <canvas id="pins"></canvas>
+          <div id="ld">Loading map…</div>
         </div>
-      </div>
-
-      <div class="header-controls" id="header-controls">
-        <div class="map-select-group">
-          <select id="mp" aria-label="Select subdivision project"></select>
-          <button type="button" id="btn-upload-map" class="admin-only map-action-btn" title="Upload new map (PDF, PNG, JPG)" style="display: none;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            <span>+ Map</span>
-          </button>
-          <button type="button" id="btn-delete-map" class="admin-only map-action-btn btn-danger-icon" title="Delete current map" style="display: none;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        </div>
-        <div class="g" id="chips"></div>
-        <div class="g" id="edit-tools">
-          <button data-m="fill" class="on">Paint lot</button>
-          <button data-m="pin">Pin</button>
-          <button data-m="erase">Erase</button>
-          <button data-m="lg">Move legend</button>
-        </div>
-        <div class="g" id="action-tools">
-          <button id="un" title="Undo">Undo</button>
-          <button id="cl" title="Clear all">Clear all</button>
-          <button id="zo" title="-">−</button>
-          <button id="zi" title="+">+</button>
-          <button id="zf" title="Fit">Fit</button>
-          <button id="png" title="Export PNG">Save PNG</button>
-        </div>
-      </div>
-      <small id="status-hint">Viewer View: Live lot updates · drag to pan</small>
-    </header>
-    <main id="stage">
-      <div id="box">
-        <canvas id="base"></canvas>
-        <canvas id="fill"></canvas>
-        <canvas id="pins"></canvas>
-        <div id="ld">Loading map…</div>
-      </div>
-    </main>
-    <div id="users-view" style="display: none;"></div>
+      </main>
+      <div id="users-view" style="display: none;"></div>
+      <small id="status-hint">Viewer View: live lot updates · drag to pan</small>
+    </section>
   </div>
 
   <div id="legend-editor-backdrop" class="legend-editor-backdrop hidden" aria-hidden="true">
@@ -171,8 +158,6 @@
   </div>
 
   <div id="t"></div>
-
   <script type="module" src="/src/main.ts"></script>
 </body>
-
 </html>

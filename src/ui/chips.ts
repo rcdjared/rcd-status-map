@@ -1,5 +1,26 @@
 import type { StatusMap } from '../map/painting';
 
+function createActionIcon(paths: string[]): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('width', '15');
+  icon.setAttribute('height', '15');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('stroke', 'currentColor');
+  icon.setAttribute('stroke-width', '2');
+  icon.setAttribute('stroke-linecap', 'round');
+  icon.setAttribute('stroke-linejoin', 'round');
+
+  paths.forEach((pathData) => {
+    const path = document.createElementNS(namespace, 'path');
+    path.setAttribute('d', pathData);
+    icon.appendChild(path);
+  });
+
+  return icon;
+}
+
 export interface ChipCallbacks {
   onSelect: (key: string) => void;
   onColorChange: (key: string, color: string) => void;
@@ -69,10 +90,23 @@ export function renderChips(
     chip.dataset.k = key;
     chip.tabIndex = 0;
 
+    const menu = document.createElement('details');
+    menu.className = 'chip-menu';
+    menu.addEventListener('click', (e) => e.stopPropagation());
+
+    const menuToggle = document.createElement('summary');
+    menuToggle.setAttribute('aria-label', `Edit ${status.n} status`);
+    menuToggle.title = `Edit ${status.n} status`;
+    menuToggle.textContent = '⋯';
+
+    const menuPanel = document.createElement('div');
+    menuPanel.className = 'chip-menu-panel';
+
     const input = document.createElement('input');
     input.type = 'color';
     input.title = 'Change color';
     input.value = status.c;
+    input.setAttribute('aria-label', `Change ${status.n} color`);
 
     const label = document.createElement('span');
     label.textContent = status.n;
@@ -84,13 +118,24 @@ export function renderChips(
     renameBtn.type = 'button';
     renameBtn.className = 'chip-action';
     renameBtn.title = 'Rename status';
-    renameBtn.textContent = '✎';
+    renameBtn.setAttribute('aria-label', 'Rename status');
+    renameBtn.appendChild(createActionIcon([
+      'M12 20h9',
+      'M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z',
+    ]));
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'chip-action danger';
     removeBtn.title = 'Remove status';
-    removeBtn.textContent = '×';
+    removeBtn.setAttribute('aria-label', 'Remove status');
+    removeBtn.appendChild(createActionIcon([
+      'M3 6h18',
+      'M8 6V4h8v2',
+      'M19 6l-1 14H6L5 6',
+      'M10 11v6',
+      'M14 11v6',
+    ]));
 
     input.addEventListener('input', (e) => {
       e.stopPropagation();
@@ -111,11 +156,14 @@ export function renderChips(
       callbacks.onSelect(key);
     });
 
-    chip.appendChild(input);
     chip.appendChild(label);
     chip.appendChild(count);
-    chip.appendChild(renameBtn);
-    chip.appendChild(removeBtn);
+    menuPanel.appendChild(input);
+    menuPanel.appendChild(renameBtn);
+    menuPanel.appendChild(removeBtn);
+    menu.appendChild(menuToggle);
+    menu.appendChild(menuPanel);
+    chip.appendChild(menu);
     container.appendChild(chip);
   }
 

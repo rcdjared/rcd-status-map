@@ -297,7 +297,7 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
 
   if (statusHint) {
     if (role === 'admin') {
-      statusHint.textContent = 'Admin Mode: Click a lot to paint · drag to pan · manage team in Users tab';
+      statusHint.textContent = '';
     } else if (role === 'editor') {
       statusHint.textContent = 'Editor Mode: Click a lot to paint · drag to pan · keys 1 2 3 = status';
     } else if (role === 'disabled') {

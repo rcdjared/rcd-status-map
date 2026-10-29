@@ -83,12 +83,21 @@ export function renderChips(
 ): void {
   container.innerHTML = '';
 
-  for (const key of Object.keys(statuses)) {
+  for (const [index, key] of Object.keys(statuses).entries()) {
     const status = statuses[key];
     const chip = document.createElement('div');
     chip.className = 'chip';
     chip.dataset.k = key;
     chip.tabIndex = 0;
+    if (index < 10) {
+      const shortcut = index === 9 ? '0' : String(index + 1);
+      chip.title = `Press ${shortcut} to select ${status.n}`;
+      const shortcutHint = document.createElement('kbd');
+      shortcutHint.className = 'chip-shortcut';
+      shortcutHint.textContent = shortcut;
+      shortcutHint.setAttribute('aria-label', `Keyboard shortcut ${shortcut}`);
+      chip.appendChild(shortcutHint);
+    }
 
     const menu = document.createElement('details');
     menu.className = 'chip-menu';

@@ -23,7 +23,7 @@ export interface ActionCallbacks {
 
 export interface ShortcutCallbacks {
   onUndo: () => void;
-  onSelectStatusIndex: (index: number) => void; // 1 -> index 0 ('c'), 2 -> index 1 ('o'), 3 -> index 2 ('a')
+  onSelectStatusIndex: (index: number) => void;
   onSetMode: (mode: PaintMode) => void;
 }
 
@@ -110,20 +110,32 @@ export function initActionButtons(
     buttons.zoomFit.addEventListener('click', callbacks.onZoomFit);
   }
   if (buttons.savePng && callbacks.onSavePng) {
-    buttons.savePng.addEventListener('click', callbacks.onSavePng);
+    buttons.savePng.addEventListener('click', () => {
+      buttons.savePng?.closest('details')?.removeAttribute('open');
+      callbacks.onSavePng?.();
+    });
   }
   if (buttons.savePdf && callbacks.onSavePdf) {
-    buttons.savePdf.addEventListener('click', callbacks.onSavePdf);
+    buttons.savePdf.addEventListener('click', () => {
+      buttons.savePdf?.closest('details')?.removeAttribute('open');
+      callbacks.onSavePdf?.();
+    });
   }
 }
 
 /**
- * Listens for global keyboard shortcuts (Ctrl+Z for undo, 1/2/3 for statuses, F/P/E for modes).
+ * Listens for global keyboard shortcuts (Ctrl+Z for undo, 1-9/0 for statuses, F/P/E for modes).
  * Returns an unbind cleanup function.
  */
 export function initKeyboardShortcuts(callbacks: ShortcutCallbacks): () => void {
   const handler = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+    const target = e.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.isContentEditable || target.matches('input, textarea, select'))
+    ) {
+      return;
+    }
 
     const key = e.key.toLowerCase();
 
@@ -133,8 +145,8 @@ export function initKeyboardShortcuts(callbacks: ShortcutCallbacks): () => void 
       return;
     }
 
-    if (key === '1' || key === '2' || key === '3') {
-      callbacks.onSelectStatusIndex(Number(key) - 1);
+    if (/^[0-9]$/.test(key)) {
+      callbacks.onSelectStatusIndex(key === '0' ? 9 : Number(key) - 1);
       return;
     }
 

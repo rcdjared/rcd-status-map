@@ -128,6 +128,7 @@ const statuses: StatusMap = {
 let legendEditorMode: 'add' | 'edit' = 'add';
 let legendEditorKey: string | null = null;
 let legendStatusNextIndex = 0;
+const MAX_NUMBERED_STATUSES = 10;
 
 let currentUser: User | null = null;
 let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
@@ -544,6 +545,11 @@ function closeLegendEditor(): void {
 }
 
 function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void {
+  if (mode === 'add' && Object.keys(statuses).length >= MAX_NUMBERED_STATUSES) {
+    showToast(toastElement, 'A maximum of 10 status categories can be selected with number keys.');
+    return;
+  }
+
   legendEditorMode = mode;
   legendEditorKey = key;
 
@@ -1262,7 +1268,7 @@ initActionButtons(
   }
 );
 
-// Keyboard Shortcuts (Ctrl+Z, 1 2 3 status, F/P/E modes)
+// Keyboard Shortcuts (Ctrl+Z, 1-9/0 status, F/P/E modes)
 const getStatusKeys = (): string[] => Object.keys(statuses);
 initKeyboardShortcuts({
   onUndo: () => {
@@ -1272,7 +1278,7 @@ initKeyboardShortcuts({
   },
   onSelectStatusIndex: (index) => {
     const statusKeys = getStatusKeys();
-    if ((currentUserRole === 'admin' || currentUserRole === 'editor') && statusKeys[index]) {
+    if (statusKeys[index]) {
       setStatus(statusKeys[index]);
     }
   },

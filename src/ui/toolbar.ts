@@ -8,6 +8,7 @@ export interface ActionButtons {
   zoomIn?: HTMLElement | null;
   zoomFit?: HTMLElement | null;
   savePng?: HTMLElement | null;
+  savePdf?: HTMLElement | null;
 }
 
 export interface ActionCallbacks {
@@ -17,6 +18,7 @@ export interface ActionCallbacks {
   onZoomIn?: () => void;
   onZoomFit?: () => void;
   onSavePng?: () => void;
+  onSavePdf?: () => void;
 }
 
 export interface ShortcutCallbacks {
@@ -86,7 +88,7 @@ export function initMapSelector(
 }
 
 /**
- * Connects action buttons (undo, clear, zoom, fit, export PNG).
+ * Connects action buttons (undo, clear, zoom, fit, and map exports).
  */
 export function initActionButtons(
   buttons: ActionButtons,
@@ -109,6 +111,9 @@ export function initActionButtons(
   }
   if (buttons.savePng && callbacks.onSavePng) {
     buttons.savePng.addEventListener('click', callbacks.onSavePng);
+  }
+  if (buttons.savePdf && callbacks.onSavePdf) {
+    buttons.savePdf.addEventListener('click', callbacks.onSavePdf);
   }
 }
 

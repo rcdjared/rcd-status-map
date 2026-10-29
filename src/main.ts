@@ -91,6 +91,7 @@ const zoomOutBtn = document.querySelector<HTMLElement>('#zo');
 const zoomInBtn = document.querySelector<HTMLElement>('#zi');
 const zoomFitBtn = document.querySelector<HTMLElement>('#zf');
 const savePngBtn = document.querySelector<HTMLElement>('#png');
+const savePdfBtn = document.querySelector<HTMLElement>('#pdf');
 const authBtn = document.querySelector<HTMLElement>('#auth-btn');
 const roleBadge = document.querySelector<HTMLElement>('#role-badge');
 const statusHint = document.querySelector<HTMLElement>('#status-hint');
@@ -1170,6 +1171,7 @@ initActionButtons(
     zoomIn: zoomInBtn,
     zoomFit: zoomFitBtn,
     savePng: savePngBtn,
+    savePdf: savePdfBtn,
   },
   {
     onUndo: () => {
@@ -1231,6 +1233,31 @@ initActionButtons(
         a.click();
         URL.revokeObjectURL(a.href);
       }, 'image/png');
+    },
+    onSavePdf: async () => {
+      if (!mapWidth || !mapHeight) return;
+
+      try {
+        const { jsPDF } = await import('jspdf');
+        const compositeCanvas = compositeForExport(canvases, mapWidth, mapHeight);
+        const pdf = new jsPDF({
+          orientation: mapWidth > mapHeight ? 'landscape' : 'portrait',
+          unit: 'pt',
+          format: [mapWidth * 0.75, mapHeight * 0.75],
+        });
+        pdf.addImage(
+          compositeCanvas.toDataURL('image/png'),
+          'PNG',
+          0,
+          0,
+          pdf.internal.pageSize.getWidth(),
+          pdf.internal.pageSize.getHeight()
+        );
+        pdf.save(`RCD-${MAPS[currentMapIndex].id}-status-map.pdf`);
+      } catch (error) {
+        console.error('PDF export failed:', error);
+        showToast(toastElement, 'Unable to export the map as a PDF.');
+      }
     },
   }
 );
@@ -1429,4 +1456,3 @@ navMapBtn?.addEventListener('click', () => {
 navUsersBtn?.addEventListener('click', async () => {
   await switchToUsers();
 });
-

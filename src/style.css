@@ -473,6 +473,10 @@ body.role-viewer #edit-tools {
   display: none !important;
 }
 
+body.role-viewer #chips {
+  display: none !important;
+}
+
 body.role-viewer #un,
 body.role-viewer #cl {
   display: none !important;

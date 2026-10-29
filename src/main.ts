@@ -1278,7 +1278,7 @@ initKeyboardShortcuts({
   },
   onSelectStatusIndex: (index) => {
     const statusKeys = getStatusKeys();
-    if (statusKeys[index]) {
+    if ((currentUserRole === 'admin' || currentUserRole === 'editor') && statusKeys[index]) {
       setStatus(statusKeys[index]);
     }
   },

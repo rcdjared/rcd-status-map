@@ -43,5 +43,11 @@ the v2 phase sequence.
 - User reports dev migrations ran and four accounts were created with roles
   assigned. Exact role counts and seeded projects still need read-only
   confirmation.
-- Remaining: verify dev setup; export/inspect production data; create GitHub
-  milestones/issues. No database changes have been made by this work.
+- User reports production exports saved for `projects`, `marks`, `profiles`,
+  `role_changes`, and mark history (`mar_history` in their message), and says
+  `lot_register` is empty. These results have not been independently verified.
+- Added a read-only production inspection query. Review its output before
+  considering any production cleanup. No database changes have been made by
+  this work.
+- Remaining: verify dev setup; review production inspection results; create
+  GitHub milestones/issues.

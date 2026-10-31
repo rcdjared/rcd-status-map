@@ -63,6 +63,7 @@ the v2 phase sequence.
   local marks when the remote project cannot be loaded.
 - `npm test` (3 tests), typecheck, lint, build, and `git diff --check` pass.
   Build retains the existing large-chunk warning.
-- Pending dev manual verification: repaint keeps the same mark ID/history;
-  overlapping marks resolve to the newest; preview is dry-run and confirmed
-  cleanup deletes only duplicates. No database changes have been applied.
+- User reports dev manual checks passed: repaint identity/history, overlap
+  handling, dry-run preview, confirmed cleanup, erase, and Clear.
+- No migration or database change was made. Production dry-run across all six
+  projects and PR/CI merge remain outstanding.

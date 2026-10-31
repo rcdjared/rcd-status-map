@@ -34,8 +34,10 @@ import type { User } from '@supabase/supabase-js';
 import {
   supabase,
   getUserRole,
+  loadProjectLegendPosition,
   loadProjectStatusConfig,
   saveProjectStatusConfig,
+  saveProjectLegendPosition,
   subscribeToProjectStatusConfig,
   type Project,
   type ProjectStatusConfig,
@@ -44,6 +46,7 @@ import {
   loadMarks,
   saveMark,
   updateMark,
+  undoStatusChange,
   deleteMark,
   clearAllMarks,
   subscribeToMarks,
@@ -61,6 +64,7 @@ import { showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
 import { initMapModals } from './ui/map-modals';
 import { initDuplicateCleanup, setDuplicateCleanupAdmin } from './ui/duplicate-cleanup';
+import type { UndoAction } from './map/undo';
 import { initTheme } from './ui/theme';
 import {
   initActionButtons,
@@ -162,7 +166,8 @@ let pinRadius = 0;
 let barrierMap: Uint8Array | null = null;
 
 let marks: Mark[] = [];
-let history: Mark[][] = [];
+let history: UndoAction[] = [];
+let legendDragStartPosition: [number, number] | null = null;
 let legendPos: [number, number] = [0, 0];
 let currentStatus = 'c';
 let currentMode: PaintMode = 'fill';
@@ -270,9 +275,6 @@ function markFromRow(row: MarkRow): Mark | null {
 async function reloadMarksFromSupabase(projectId: string): Promise<void> {
   const { data, error } = await loadMarks(projectId);
   if (error || !data) {
-    marks = [];
-    saveState();
-    renderAll();
     throw error || new Error('Supabase returned no mark data');
   }
   marks = data.map(markFromRow).filter((mark): mark is Mark => mark !== null);
@@ -318,8 +320,8 @@ function applyStatusConfig(config: ProjectStatusConfig | null): void {
   });
 }
 
-function snapshot(): void {
-  history.push([...marks]);
+function recordUndo(action: UndoAction): void {
+  history.push(action);
   if (history.length > 100) {
     history.shift();
   }
@@ -528,23 +530,107 @@ function setZoom(factor: number): void {
 }
 
 async function undo(): Promise<void> {
-  if (history.length > 0) {
-    const previousMarks = marks;
-    marks = history.pop()!;
-    refreshStatusUi();
-    saveState();
+  const action = history.at(-1);
+  if (!action) return;
+  if (!currentUser || !currentProjectId) {
+    showToast(toastElement, 'Undo requires a connected project. No local-only undo was applied.');
+    return;
+  }
 
-    // If a mark was removed by undo, delete it from Supabase as well
-    if (currentUser && previousMarks.length > marks.length) {
-      const removedMark = previousMarks[previousMarks.length - 1];
-      if (removedMark?.id) {
-        const { error } = await deleteMark(removedMark.id);
-        if (error) {
-          console.warn('Supabase deleteMark on undo error:', error.message);
-        }
+  const actions = action.kind === 'batch' ? [...action.actions].reverse() : [action];
+  const touchedMarks = new Set<string>();
+  const legendUndo: Extract<UndoAction, { kind: 'legend' }>[] = [];
+  let failure: Error | null = null;
+
+  for (const inverse of actions) {
+    if (inverse.kind === 'add') {
+      if (!inverse.mark.id) {
+        failure = new Error('The added mark has no saved ID and cannot be undone safely.');
+        break;
       }
+      const { error } = await deleteMark(inverse.mark.id);
+      if (error) {
+        failure = error;
+        break;
+      }
+      touchedMarks.add(inverse.mark.id);
+    } else if (inverse.kind === 'erase') {
+      for (const erased of inverse.marks) {
+        if (!erased.id) {
+          failure = new Error('An erased mark has no saved ID and cannot be restored safely.');
+          break;
+        }
+        const { error } = await saveMark({
+          id: erased.id,
+          project_id: currentProjectId,
+          x: erased.x / mapWidth,
+          y: erased.y / mapHeight,
+          status: erased.s,
+          kind: erased.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
+        if (error) {
+          failure = error;
+          break;
+        }
+        touchedMarks.add(erased.id);
+      }
+      if (failure) break;
+    } else if (inverse.kind === 'status') {
+      const mark = marks.find((candidate) => candidate.id === inverse.markId);
+      if (!mark || mark.s !== inverse.newStatus) {
+        failure = new Error('This mark changed since your edit. Refresh before undoing.');
+        break;
+      }
+      const { data, error } = await undoStatusChange(inverse.markId, inverse.previousStatus);
+      if (error || !data) {
+        failure = error || new Error('Status undo returned no updated mark.');
+        break;
+      }
+      touchedMarks.add(inverse.markId);
+    } else if (inverse.kind === 'legend') {
+      const { error } = await saveProjectLegendPosition(currentProjectId, inverse.previous);
+      if (error) {
+        failure = error;
+        break;
+      }
+      legendUndo.push(inverse);
     }
   }
+
+  if (failure) {
+    history = [];
+    try {
+      await reloadMarksFromSupabase(currentProjectId);
+    } catch (syncError) {
+      const syncMessage = syncError instanceof Error ? syncError.message : String(syncError);
+      failure = new Error(`${failure.message}; refreshing from Supabase also failed: ${syncMessage}`);
+    }
+    if (legendUndo.length) {
+      legendPos = legendUndo[legendUndo.length - 1].previous;
+      saveState();
+      renderAll();
+    }
+    const partial = actions.length > 1 ? ' Some parts may have been undone.' : '';
+    showToast(toastElement, `${failure.message}.${partial} Undo history was cleared to avoid replaying a partial action.`);
+    return;
+  }
+
+  history.pop();
+  for (const legend of legendUndo) {
+    legendPos = legend.previous;
+  }
+  if (touchedMarks.size) {
+    try {
+      await reloadMarksFromSupabase(currentProjectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(toastElement, `Undo saved, but refreshing marks failed: ${message}`);
+      return;
+    }
+  }
+  saveState();
+  refreshStatusUi();
 }
 
 function setStatus(key: string): void {
@@ -727,6 +813,11 @@ async function openMap(index: number): Promise<void> {
 
     // 1. Try to resolve project ID from Supabase
     currentProjectId = await resolveProjectId(index);
+    if (currentProjectId) {
+      const { position, error } = await loadProjectLegendPosition(currentProjectId);
+      if (position) legendPos = position;
+      else if (error) showToast(toastElement, `Could not load legend position: ${error.message}`);
+    }
     if (!currentProjectId && currentUser) {
       showToast(toastElement, 'This project is not available from Supabase; cached marks were not loaded.');
     }
@@ -850,11 +941,28 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
     showToast(toastElement, 'Viewer View: Editing is restricted to administrators.');
     return;
   }
+  if (currentUser && !currentProjectId) {
+    showToast(toastElement, 'This project is not connected to Supabase, so edits are disabled.');
+    return;
+  }
 
   const { x, y } = screenToMapCoords(clientX, clientY, box, mapWidth, mapHeight);
 
   if (currentMode === 'lg') {
-    legendPos = [Math.min(x / mapWidth, 0.73), Math.min(y / mapHeight, 0.935)];
+    const previousPosition: [number, number] = [...legendPos];
+    const nextPosition: [number, number] = [
+      Math.min(x / mapWidth, 0.73),
+      Math.min(y / mapHeight, 0.935),
+    ];
+    if (currentUser && currentProjectId) {
+      const { error } = await saveProjectLegendPosition(currentProjectId, nextPosition);
+      if (error) {
+        showToast(toastElement, `Could not move legend: ${error.message}`);
+        return;
+      }
+    }
+    legendPos = nextPosition;
+    recordUndo({ kind: 'legend', previous: previousPosition, next: nextPosition });
     renderAll();
     saveState();
     return;
@@ -883,6 +991,7 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
     const syncAfterFailure = async (error: Error): Promise<void> => {
       let message = error.message;
       if (remoteChanged && currentProjectId) {
+        history = [];
         try {
           await reloadMarksFromSupabase(currentProjectId);
         } catch (syncError) {
@@ -894,7 +1003,10 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
       showToast(toastElement, `Map change was not fully saved: ${message}`);
     };
 
-    if (shouldPersist && result.updatedMark) {
+    const previousMark = result.updatedMark
+      ? marks.find((mark) => mark.id === result.updatedMark?.id)
+      : undefined;
+    if (shouldPersist && result.updatedMark && previousMark?.s !== result.updatedMark.s) {
       if (!result.updatedMark.id || !currentUser || !currentProjectId) {
         showToast(toastElement, 'Cannot update a fill without its saved mark ID.');
         return;
@@ -947,8 +1059,39 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
       markToSave.updated_by = data.updated_by;
     }
 
-    snapshot();
-    marks = result.updatedMarks;
+    const undoActions: UndoAction[] = [];
+    if (result.updatedMark && previousMark && previousMark.s !== result.updatedMark.s) {
+      undoActions.push({
+        kind: 'status',
+        markId: result.updatedMark.id!,
+        previousStatus: previousMark.s,
+        newStatus: result.updatedMark.s,
+      });
+    }
+    if (marksToDelete.length) {
+      undoActions.push({ kind: 'erase', marks: marksToDelete });
+    }
+    if (result.addedMark) {
+      undoActions.push({ kind: 'add', mark: result.addedMark });
+    }
+
+    const deletedIds = new Set(marksToDelete.map((mark) => mark.id).filter(Boolean));
+    marks = marks.filter((mark) => !mark.id || !deletedIds.has(mark.id));
+    if (result.updatedMark) {
+      const updatedIndex = previousMark
+        ? marks.indexOf(previousMark)
+        : marks.findIndex((mark) => mark.id === result.updatedMark?.id);
+      if (updatedIndex >= 0) marks[updatedIndex] = result.updatedMark;
+      else marks.push(result.updatedMark);
+    }
+    if (result.addedMark && !marks.some((mark) => mark.id && mark.id === result.addedMark?.id)) {
+      marks.push(result.addedMark);
+    }
+    if (undoActions.length === 1) {
+      recordUndo(undoActions[0]);
+    } else if (undoActions.length > 1) {
+      recordUndo({ kind: 'batch', actions: undoActions });
+    }
     refreshStatusUi();
     saveState();
   }
@@ -1056,6 +1199,7 @@ stage.addEventListener('pointerdown', (e: PointerEvent) => {
     if (hitLegend) {
       isDraggingLegend = true;
       pointerMoved = true;
+      legendDragStartPosition = [...legendPos];
       legendDragOffsetX = x - bounds.x;
       legendDragOffsetY = y - bounds.y;
       e.preventDefault();
@@ -1105,11 +1249,33 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
   }
 });
 
-const handlePointerUp = () => {
+const handlePointerUp = async () => {
   if (isDraggingLegend) {
     isDraggingLegend = false;
     legendDragOffsetX = 0;
     legendDragOffsetY = 0;
+    const previousPosition = legendDragStartPosition;
+    legendDragStartPosition = null;
+    if (previousPosition && (previousPosition[0] !== legendPos[0] || previousPosition[1] !== legendPos[1])) {
+      if (!currentUser || !currentProjectId) {
+        legendPos = previousPosition;
+        renderAll();
+        saveState();
+        showToast(toastElement, 'Legend changes require a connected Supabase project.');
+        return;
+      }
+      const nextPosition: [number, number] = [...legendPos];
+      const { error } = await saveProjectLegendPosition(currentProjectId, nextPosition);
+      if (error) {
+        legendPos = previousPosition;
+        renderAll();
+        saveState();
+        showToast(toastElement, `Could not save legend position: ${error.message}`);
+        return;
+      }
+      recordUndo({ kind: 'legend', previous: previousPosition, next: nextPosition });
+      saveState();
+    }
     return;
   }
 
@@ -1286,10 +1452,11 @@ initActionButtons(
           }
         }
 
-        snapshot();
+        history = [];
         marks = [];
         refreshStatusUi();
         saveState();
+        showToast(toastElement, 'Map cleared. Clear cannot be undone safely; undo history was cleared.');
       }
     },
     onZoomOut: () => setZoom(0.8),

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { findDuplicateFillGroups, newestMark } from '../src/map/duplicate-marks.ts';
+import { canUndoStatusChange } from '../src/map/undo.ts';
 
 function fill(id, spans, updatedAt) {
   return {
@@ -38,4 +39,11 @@ test('does not group pins or fills without computed regions', () => {
   const noRegion = { id: 'no-region', t: 'f', x: 1, y: 1, s: 'available' };
 
   assert.deepEqual(findDuplicateFillGroups([pin, noRegion, noRegion]), []);
+});
+
+test('allows status undo only while the current user owns the latest status change', () => {
+  assert.equal(canUndoStatusChange('available', 'sold', 'user-a', 'user-a'), true);
+  assert.equal(canUndoStatusChange('available', 'sold', 'user-b', 'user-a'), false);
+  assert.equal(canUndoStatusChange('sold', 'sold', 'user-a', 'user-a'), false);
+  assert.equal(canUndoStatusChange('available', 'sold', null, 'user-a'), false);
 });

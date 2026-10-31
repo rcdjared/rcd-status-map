@@ -1,4 +1,5 @@
 import { supabase, type Database, type MarkRow } from './supabase';
+import { canUndoStatusChange } from '../map/undo';
 
 export interface MarkData {
   id?: string;
@@ -86,6 +87,74 @@ export async function updateMark(
 
     if (error) {
       return { data: null, error: new Error(error.message) };
+    }
+    return { data, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
+export async function undoStatusChange(
+  markId: string,
+  previousStatus: string
+): Promise<ApiResponse<MarkRow>> {
+  try {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      return { data: null, error: new Error('Sign in before undoing a status change.') };
+    }
+
+    const { data: latestChange, error: historyError } = await supabase
+      .from('mark_history')
+      .select('old_status, new_status, changed_by')
+      .eq('mark_id', markId)
+      .order('changed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (historyError) {
+      return { data: null, error: new Error(historyError.message) };
+    }
+    if (
+      !latestChange ||
+      latestChange.old_status !== previousStatus ||
+      !canUndoStatusChange(
+        previousStatus,
+        latestChange.new_status ?? '',
+        latestChange.changed_by,
+        authData.user.id
+      )
+    ) {
+      return {
+        data: null,
+        error: new Error('This status was changed by another action. Refresh before undoing.'),
+      };
+    }
+
+    const { data, error } = await supabase
+      .from('marks')
+      .update({
+        status: previousStatus,
+        updated_by: authData.user.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', markId)
+      .eq('status', latestChange.new_status)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error: new Error(error.message) };
+    }
+    if (!data) {
+      return {
+        data: null,
+        error: new Error('This mark changed since the action. Undo was cancelled.'),
+      };
     }
     return { data, error: null };
   } catch (err) {

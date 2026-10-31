@@ -227,6 +227,47 @@ export async function saveProjectStatusConfig(
   }
 }
 
+export async function saveProjectLegendPosition(
+  projectId: string,
+  position: [number, number]
+): Promise<{ error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .update({ legend_x: position[0], legend_y: position[1] })
+      .eq('id', projectId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) return { error: new Error(error.message) };
+    if (!data) return { error: new Error('Project was not found or is not writable.') };
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
+
+export async function loadProjectLegendPosition(
+  projectId: string
+): Promise<{ position: [number, number] | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('legend_x, legend_y')
+      .eq('id', projectId)
+      .maybeSingle();
+
+    if (error) return { position: null, error: new Error(error.message) };
+    if (!data) return { position: null, error: new Error('Project was not found.') };
+    return { position: [data.legend_x ?? 0.5, data.legend_y ?? 0.5], error: null };
+  } catch (error) {
+    return {
+      position: null,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
 export function subscribeToProjectStatusConfig(
   projectId: string,
   onChange: (config: ProjectStatusConfig | null) => void

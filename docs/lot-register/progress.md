@@ -67,3 +67,17 @@ the v2 phase sequence.
   handling, dry-run preview, confirmed cleanup, erase, and Clear.
 - No migration or database change was made. Production dry-run across all six
   projects and PR/CI merge remain outstanding.
+- Removed automatic migration deployment on pushes to `main`; production
+  migration workflow now requires a manual dispatch with explicit confirmation.
+
+### Phase 2 — Persistent undo (implementation in progress)
+
+- Replaced mark snapshots with inverse actions for add, erase, status change,
+  and legend position. Clear intentionally clears undo history and explains
+  that it cannot be safely undone.
+- Status undo checks the latest audit event and conditionally updates only if
+  the mark still has the status this user changed. No database changes made.
+- `npm test` (4 tests), typecheck, lint, build, and `git diff --check` pass;
+  build retains the existing large-chunk warning.
+- Pending dev two-browser checks: undo add/erase/status, reload persistence,
+  and refusal after another user changes the status.

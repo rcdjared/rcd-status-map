@@ -29,6 +29,8 @@ the v2 phase sequence.
 
 - Keep this log brief: record milestones, validation, and blockers only.
 - After each substantial change, provide a suggested commit message.
+- Do not import production data into dev; use seeded projects and test data.
+  Keep production exports as backups.
 
 ## Execution log
 

@@ -486,9 +486,7 @@ function setZoom(factor: number): void {
     currentZoom,
     panX,
     panY,
-    stage,
-    mapWidth,
-    mapHeight
+    stage
   );
   currentZoom = res.zoom;
   panX = res.panX;
@@ -1080,9 +1078,7 @@ stage.addEventListener(
       currentZoom,
       panX,
       panY,
-      stage,
-      mapWidth,
-      mapHeight
+      stage
     );
     currentZoom = res.zoom;
     panX = res.panX;
@@ -1137,9 +1133,7 @@ stage.addEventListener(
         initialPinchZoom,
         initialPinchPanX + (currentMidX - initialPinchMidX),
         initialPinchPanY + (currentMidY - initialPinchMidY),
-        stage,
-        mapWidth,
-        mapHeight
+        stage
       );
       currentZoom = res.zoom;
       panX = res.panX;

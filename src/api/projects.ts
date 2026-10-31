@@ -54,7 +54,7 @@ export async function loadProjects(): Promise<ApiResponse<Project[]>> {
     });
 
     return { data: combined, error: null };
-  } catch (err) {
+  } catch {
     const localProjects = getLocalCustomProjects();
     return {
       data: localProjects,
@@ -142,7 +142,7 @@ export async function createProject(params: {
     }
 
     return { data, error: null };
-  } catch (err) {
+  } catch {
     const localFallbackProject: Project = {
       id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: params.name.trim(),

@@ -40,7 +40,8 @@ the v2 phase sequence.
   remove production objects before exporting and inspecting affected data.
 - Repository safety files and CI updates are in place. Typecheck, lint, build,
   and `git diff --check` passed; build has the existing large-chunk warning.
-- User reports the new dev project has migrations run and four test accounts
-  created. Roles and seeded projects still need read-only confirmation.
+- User reports dev migrations ran and four accounts were created with roles
+  assigned. Exact role counts and seeded projects still need read-only
+  confirmation.
 - Remaining: verify dev setup; export/inspect production data; create GitHub
   milestones/issues. No database changes have been made by this work.

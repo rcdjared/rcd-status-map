@@ -70,7 +70,7 @@ the v2 phase sequence.
 - Removed automatic migration deployment on pushes to `main`; production
   migration workflow now requires a manual dispatch with explicit confirmation.
 
-### Phase 2 — Persistent undo (implementation in progress)
+### Phase 2 — Persistent undo (dev manual checks reported passing)
 
 - Replaced mark snapshots with inverse actions for add, erase, status change,
   and legend position. Clear intentionally clears undo history and explains
@@ -79,5 +79,18 @@ the v2 phase sequence.
   the mark still has the status this user changed. No database changes made.
 - `npm test` (4 tests), typecheck, lint, build, and `git diff --check` pass;
   build retains the existing large-chunk warning.
-- Pending dev two-browser checks: undo add/erase/status, reload persistence,
-  and refusal after another user changes the status.
+- User reports two-browser add/erase/status undo, reload persistence, and
+  conflict refusal all passed.
+
+### Phase 3 — Access rules (migration drafted; dev verification pending)
+
+- UI/API review: editors and admins update `projects.legend_x`,
+  `projects.legend_y`, and `projects.status_config`; admins create projects
+  (`name`, `map_url`, initial legend coordinates) and delete projects. Map
+  uploads write to the `maps` Storage bucket and are admin-only in the UI.
+- User confirmed this inventory. Added migration 013 and role-based verification
+  SQL; neither has been applied. `npm test` (4 tests), typecheck, lint, build,
+  and `git diff --check` pass. No database changes made.
+- Mark history remains cascade-deleted with its mark as before: mark deletion
+  can remove its audit trail, preserving existing behavior but limiting audit
+  retention for deleted marks.

@@ -108,6 +108,9 @@
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
             </button>
+            <button type="button" id="btn-cleanup-duplicates" class="admin-only map-action-btn" style="display: none;">
+              Find duplicate fills
+            </button>
           </div>
           <div class="g" id="chips"></div>
           <div class="g" id="action-tools">
@@ -158,6 +161,7 @@
         <label for="legend-name-input">Label</label>
         <input id="legend-name-input" type="text" maxlength="28" placeholder="e.g. Completed" />
       </div>
+
       <div class="legend-editor-field">
         <label for="legend-color-input">Color</label>
         <input id="legend-color-input" type="color" value="#1f9d55" />
@@ -167,6 +171,36 @@
         <button type="button" id="legend-save-btn" class="btn-primary">Save</button>
       </div>
     </div>
+  </div>
+
+  <div id="duplicate-cleanup-backdrop" class="modal-overlay" style="display:none;" aria-hidden="true" data-admin="false">
+    <section class="modal-content modal-content-lg duplicate-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-cleanup-title">
+      <header class="modal-header">
+        <h2 id="duplicate-cleanup-title">Duplicate fill cleanup</h2>
+        <p class="modal-sub">Dry run by default. For each duplicate group, the most recently updated fill is kept.</p>
+      </header>
+      <p id="duplicate-cleanup-status" role="status"></p>
+      <p id="duplicate-cleanup-empty" style="display:none;">No duplicate fill groups found.</p>
+      <div class="duplicate-cleanup-table-wrap">
+        <table class="history-table duplicate-cleanup-table">
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Mark ID</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th>Updated by</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="duplicate-cleanup-table-body"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="duplicate-cleanup-close" class="btn btn-secondary">Close</button>
+        <button type="button" id="duplicate-cleanup-confirm" class="btn btn-danger" disabled>Confirm and delete duplicates</button>
+      </div>
+    </section>
   </div>
 
   <div id="t"></div>

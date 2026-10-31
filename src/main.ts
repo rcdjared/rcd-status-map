@@ -40,7 +40,15 @@ import {
   type Project,
   type ProjectStatusConfig,
 } from './api/supabase';
-import { loadMarks, saveMark, deleteMark, clearAllMarks, subscribeToMarks } from './api/marks';
+import {
+  loadMarks,
+  saveMark,
+  updateMark,
+  deleteMark,
+  clearAllMarks,
+  subscribeToMarks,
+} from './api/marks';
+import type { MarkRow } from './api/supabase';
 import { loadProjects, loadProjectMapImage, populateProjectSelect } from './api/projects';
 import {
   initAuth,
@@ -52,6 +60,7 @@ import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
 import { initMapModals } from './ui/map-modals';
+import { initDuplicateCleanup, setDuplicateCleanupAdmin } from './ui/duplicate-cleanup';
 import { initTheme } from './ui/theme';
 import {
   initActionButtons,
@@ -73,6 +82,13 @@ const chipsContainer = document.querySelector<HTMLElement>('#chips')!;
 const mapSelect = document.querySelector<HTMLSelectElement>('#mp')!;
 const btnUploadMap = document.querySelector<HTMLButtonElement>('#btn-upload-map');
 const btnDeleteMap = document.querySelector<HTMLButtonElement>('#btn-delete-map');
+const duplicateCleanupBtn = document.querySelector<HTMLButtonElement>('#btn-cleanup-duplicates');
+const duplicateCleanupBackdrop = document.querySelector<HTMLElement>('#duplicate-cleanup-backdrop');
+const duplicateCleanupStatus = document.querySelector<HTMLElement>('#duplicate-cleanup-status');
+const duplicateCleanupTableBody = document.querySelector<HTMLElement>('#duplicate-cleanup-table-body');
+const duplicateCleanupEmpty = document.querySelector<HTMLElement>('#duplicate-cleanup-empty');
+const duplicateCleanupConfirm = document.querySelector<HTMLButtonElement>('#duplicate-cleanup-confirm');
+const duplicateCleanupClose = document.querySelector<HTMLButtonElement>('#duplicate-cleanup-close');
 const loadingIndicator = document.querySelector<HTMLElement>('#ld')!;
 const toastElement = document.querySelector<HTMLElement>('#t')!;
 
@@ -209,7 +225,15 @@ function getStorageKey(): string {
 
 function saveState(): void {
   try {
-    const serializedMarks = marks.map(({ id, t, x, y, s }) => ({ id, t, x, y, s }));
+    const serializedMarks = marks.map(({ id, t, x, y, s, updated_at, updated_by }) => ({
+      id,
+      t,
+      x,
+      y,
+      s,
+      updated_at,
+      updated_by,
+    }));
     const savedStatuses = Object.fromEntries(
       Object.entries(statuses).map(([k, v]) => [k, { n: v.n, c: v.c }])
     );
@@ -221,6 +245,39 @@ function saveState(): void {
   } catch {
     // Ignore storage quota errors
   }
+}
+
+function markFromRow(row: MarkRow): Mark | null {
+  const x = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+  const y = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+  const mark: Mark = {
+    id: row.id,
+    t: row.kind === 'pin' ? 'p' : 'f',
+    x,
+    y,
+    s: row.status,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+  };
+  if (mark.t === 'f') {
+    if (!barrierMap) return null;
+    const spans = region(x, y, mapWidth, mapHeight, barrierMap);
+    if (spans) mark.sp = spans;
+  }
+  return mark.t === 'p' || mark.sp ? mark : null;
+}
+
+async function reloadMarksFromSupabase(projectId: string): Promise<void> {
+  const { data, error } = await loadMarks(projectId);
+  if (error || !data) {
+    marks = [];
+    saveState();
+    renderAll();
+    throw error || new Error('Supabase returned no mark data');
+  }
+  marks = data.map(markFromRow).filter((mark): mark is Mark => mark !== null);
+  saveState();
+  renderAll();
 }
 
 function applyStatusConfig(config: ProjectStatusConfig | null): void {
@@ -322,6 +379,9 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   if (btnDeleteMap) {
     btnDeleteMap.style.display = isAdmin ? 'inline-flex' : 'none';
   }
+  if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
+    setDuplicateCleanupAdmin(duplicateCleanupBackdrop, duplicateCleanupBtn, isAdmin);
+  }
 
   // If user was viewing users panel and got demoted, redirect back to map
   if (!isAdmin && usersView && usersView.style.display !== 'none') {
@@ -366,23 +426,8 @@ function setupRealtimeForCurrentProject(projectId: string): void {
     if (change.eventType === 'INSERT') {
       const row = change.newRecord;
       if (!row || marks.some((m) => m.id === row.id)) return;
-
-      const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-      const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-      const m: Mark = {
-        id: row.id,
-        t: row.kind === 'pin' ? 'p' : 'f',
-        x: px,
-        y: py,
-        s: row.status,
-      };
-
-      if (m.t === 'f') {
-        const spans = region(px, py, mapWidth, mapHeight, barrierMap);
-        if (spans) m.sp = spans;
-      }
-
-      if (m.t === 'p' || m.sp) {
+      const m = markFromRow(row);
+      if (m) {
         marks.push(m);
         renderAll();
         saveState();
@@ -402,21 +447,8 @@ function setupRealtimeForCurrentProject(projectId: string): void {
       if (!row) return;
 
       const existingIndex = marks.findIndex((m) => m.id === row.id);
-      const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-      const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-
-      const updatedMark: Mark = {
-        id: row.id,
-        t: row.kind === 'pin' ? 'p' : 'f',
-        x: px,
-        y: py,
-        s: row.status,
-      };
-
-      if (updatedMark.t === 'f') {
-        const spans = region(px, py, mapWidth, mapHeight, barrierMap);
-        if (spans) updatedMark.sp = spans;
-      }
+      const updatedMark = markFromRow(row);
+      if (!updatedMark) return;
 
       if (existingIndex >= 0) {
         marks[existingIndex] = updatedMark;
@@ -695,8 +727,9 @@ async function openMap(index: number): Promise<void> {
 
     // 1. Try to resolve project ID from Supabase
     currentProjectId = await resolveProjectId(index);
-
-    let loadedFromSupabase = false;
+    if (!currentProjectId && currentUser) {
+      showToast(toastElement, 'This project is not available from Supabase; cached marks were not loaded.');
+    }
 
     // 2. If project ID resolved, attempt to load marks from Supabase
     if (currentProjectId) {
@@ -706,37 +739,19 @@ async function openMap(index: number): Promise<void> {
       }
 
       const { data: supaMarks, error } = await loadMarks(currentProjectId);
-      if (!error && supaMarks && supaMarks.length > 0) {
-        loadedFromSupabase = true;
-        marks = supaMarks
-          .map((row) => {
-            const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-            const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-            const m: Mark = {
-              id: row.id,
-              t: row.kind === 'pin' ? 'p' : 'f',
-              x: px,
-              y: py,
-              s: row.status,
-            };
-            if (m.t === 'f') {
-              const spans = region(px, py, mapWidth, mapHeight, barrierMap!);
-              if (spans) m.sp = spans;
-            }
-            return m;
-          })
-          .filter((m) => m.t === 'p' || m.sp);
-
-        // Keep local storage synchronized with latest Supabase state
+      if (!error && supaMarks) {
+        marks = supaMarks.map(markFromRow).filter((mark): mark is Mark => mark !== null);
         saveState();
+      } else if (error) {
+        showToast(toastElement, `Could not load saved marks: ${error.message}`);
       }
 
       // Connect realtime updates
       setupRealtimeForCurrentProject(currentProjectId);
     }
 
-    // 3. Fallback to localStorage if not loaded from Supabase (or user is offline/unauthenticated)
-    if (!loadedFromSupabase) {
+    // Local cached marks are used only when there is no authenticated server project.
+    if (!currentProjectId && !currentUser) {
       try {
         const raw = localStorage.getItem(getStorageKey());
         if (raw) {
@@ -803,56 +818,14 @@ async function openProject(proj: Project): Promise<void> {
 
     // Fetch marks from Supabase
     const { data: supaMarks, error } = await loadMarks(proj.id);
-    if (!error && supaMarks && supaMarks.length > 0) {
-      marks = supaMarks
-        .map((row) => {
-          const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-          const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-          const m: Mark = {
-            id: row.id,
-            t: row.kind === 'pin' ? 'p' : 'f',
-            x: px,
-            y: py,
-            s: row.status,
-          };
-          if (m.t === 'f') {
-            const spans = region(px, py, mapWidth, mapHeight, barrierMap!);
-            if (spans) m.sp = spans;
-          }
-          return m;
-        })
-        .filter((m) => m.t === 'p' || m.sp);
-
+    if (!error && supaMarks) {
+      marks = supaMarks.map(markFromRow).filter((mark): mark is Mark => mark !== null);
       saveState();
+    } else if (error) {
+      showToast(toastElement, `Could not load saved marks: ${error.message}`);
     }
 
-    if (currentProjectId) {
-      setupRealtimeForCurrentProject(currentProjectId);
-    } else {
-      // Fallback to local storage if empty or offline
-      try {
-        const raw = localStorage.getItem(getStorageKey());
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          marks = Array.isArray(parsed) ? parsed : parsed.marks || [];
-          if (parsed && parsed.lg) {
-            legendPos = parsed.lg;
-          }
-        }
-      } catch {
-        // Ignore storage parse errors
-      }
-
-      marks = marks.filter((m) => {
-        if (m.t === 'p') return true;
-        const spans = region(m.x, m.y, mapWidth, mapHeight, barrierMap!);
-        if (spans) {
-          m.sp = spans;
-          return true;
-        }
-        return false;
-      });
-    }
+    setupRealtimeForCurrentProject(proj.id);
 
     loadingIndicator.style.display = 'none';
     fitAndCenterMap();
@@ -905,44 +878,147 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
   }
 
   if (result.actionTaken) {
+    const shouldPersist = Boolean(currentUser && currentProjectId);
+    let remoteChanged = false;
+    const syncAfterFailure = async (error: Error): Promise<void> => {
+      let message = error.message;
+      if (remoteChanged && currentProjectId) {
+        try {
+          await reloadMarksFromSupabase(currentProjectId);
+        } catch (syncError) {
+          const syncMessage =
+            syncError instanceof Error ? syncError.message : String(syncError);
+          message += `; refreshing from Supabase also failed: ${syncMessage}`;
+        }
+      }
+      showToast(toastElement, `Map change was not fully saved: ${message}`);
+    };
+
+    if (shouldPersist && result.updatedMark) {
+      if (!result.updatedMark.id || !currentUser || !currentProjectId) {
+        showToast(toastElement, 'Cannot update a fill without its saved mark ID.');
+        return;
+      }
+      const { data, error } = await updateMark(result.updatedMark.id, {
+        status: result.updatedMark.s,
+        updated_by: currentUser.id,
+      });
+      if (error || !data) {
+        showToast(toastElement, `Could not update fill: ${error?.message || 'No row returned'}`);
+        return;
+      }
+      remoteChanged = true;
+      result.updatedMark.updated_at = data.updated_at;
+      result.updatedMark.updated_by = data.updated_by;
+    }
+
+    const marksToDelete = [
+      ...(result.erasedMark ? [result.erasedMark] : []),
+      ...(result.erasedMarks || []),
+    ];
+    if (shouldPersist) {
+      for (const mark of marksToDelete) {
+        if (!mark.id) continue;
+        const { error } = await deleteMark(mark.id);
+        if (error) {
+          await syncAfterFailure(error);
+          return;
+        }
+        remoteChanged = true;
+      }
+    }
+
+    if (result.addedMark && shouldPersist && currentUser && currentProjectId) {
+      const markToSave = result.addedMark;
+      const { data, error } = await saveMark({
+        project_id: currentProjectId,
+        x: markToSave.x / mapWidth,
+        y: markToSave.y / mapHeight,
+        status: markToSave.s,
+        kind: markToSave.t === 'p' ? 'pin' : 'fill',
+        updated_by: currentUser.id,
+      });
+      if (error || !data) {
+        await syncAfterFailure(error || new Error('No row returned'));
+        return;
+      }
+      markToSave.id = data.id;
+      markToSave.updated_at = data.updated_at;
+      markToSave.updated_by = data.updated_by;
+    }
+
     snapshot();
     marks = result.updatedMarks;
     refreshStatusUi();
-
-    if (currentUser && result.erasedMark?.id) {
-      const { error } = await deleteMark(result.erasedMark.id);
-      if (error) {
-        console.warn('Supabase deleteMark error:', error.message);
-      } else {
-        saveState();
-      }
-    }
-
-    // If a new mark was placed or filled, save it to Supabase
-    if (result.addedMark) {
-      if (currentUser && currentProjectId) {
-        const markToSave = result.addedMark;
-        const normX = markToSave.x / mapWidth;
-        const normY = markToSave.y / mapHeight;
-
-        const { data, error } = await saveMark({
-          project_id: currentProjectId,
-          x: normX,
-          y: normY,
-          status: markToSave.s,
-          kind: markToSave.t === 'p' ? 'pin' : 'fill',
-          updated_by: currentUser.id,
-        });
-
-        if (error) {
-          console.warn('Supabase saveMark error (saved locally):', error.message);
-        } else if (data?.id) {
-          markToSave.id = data.id;
-          saveState(); // update localStorage with Supabase UUID
-        }
-      }
-    }
+    saveState();
   }
+}
+
+if (
+  duplicateCleanupBtn &&
+  duplicateCleanupBackdrop &&
+  duplicateCleanupStatus &&
+  duplicateCleanupTableBody &&
+  duplicateCleanupEmpty &&
+  duplicateCleanupConfirm &&
+  duplicateCleanupClose
+) {
+  initDuplicateCleanup(
+    {
+      button: duplicateCleanupBtn,
+      backdrop: duplicateCleanupBackdrop,
+      status: duplicateCleanupStatus,
+      tableBody: duplicateCleanupTableBody,
+      emptyMessage: duplicateCleanupEmpty,
+      confirmButton: duplicateCleanupConfirm,
+      closeButtons: [duplicateCleanupClose],
+    },
+    async () => {
+      if (currentUserRole !== 'admin' || !currentProjectId) {
+        throw new Error('Administrator access and an active project are required.');
+      }
+      const { data, error } = await loadMarks(currentProjectId);
+      if (error || !data) {
+        throw error || new Error('Supabase returned no mark data.');
+      }
+      return data
+        .map(markFromRow)
+        .filter((mark): mark is Mark => mark !== null && mark.t === 'f');
+    },
+    async (markIds) => {
+      if (currentUserRole !== 'admin' || !currentUser || !currentProjectId) {
+        return { deleted: 0, error: new Error('Administrator access is required.') };
+      }
+
+      let deleted = 0;
+      for (const markId of markIds) {
+        const { error } = await deleteMark(markId);
+        if (error) {
+          let cleanupError = error;
+          if (deleted > 0) {
+            try {
+              await reloadMarksFromSupabase(currentProjectId);
+            } catch (syncError) {
+              const syncMessage =
+                syncError instanceof Error ? syncError.message : String(syncError);
+              cleanupError = new Error(`${error.message}; refreshing marks also failed: ${syncMessage}`);
+            }
+          }
+          return { deleted, error: cleanupError };
+        }
+        deleted += 1;
+      }
+
+      try {
+        await reloadMarksFromSupabase(currentProjectId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { deleted, error: new Error(`Deleted marks, but could not refresh the map: ${message}`) };
+      }
+      showToast(toastElement, `Removed ${deleted} duplicate fill mark${deleted === 1 ? '' : 's'}.`);
+      return { deleted, error: null };
+    }
+  );
 }
 
 // Attach map click handler to stage, verifying the click is within the rendered map box
@@ -1184,16 +1260,33 @@ initActionButtons(
         return;
       }
       if (marks.length > 0) {
-        snapshot();
-
         // If authenticated and project_id exists, delete all marks from Supabase
         if (currentUser && currentProjectId) {
-          const { error } = await clearAllMarks(currentProjectId);
+          const marksBeforeClear = marks;
+          const { data, error } = await clearAllMarks(currentProjectId);
           if (error) {
-            console.warn('Supabase clearAllMarks error:', error.message);
+            showToast(toastElement, `Could not clear map: ${error.message}`);
+            return;
+          }
+          const savedIds = new Set(data?.deleted_ids || []);
+          if (marksBeforeClear.some((mark) => mark.id && !savedIds.has(mark.id))) {
+            try {
+              await reloadMarksFromSupabase(currentProjectId);
+            } catch (syncError) {
+              const message =
+                syncError instanceof Error ? syncError.message : String(syncError);
+              showToast(toastElement, `Could not verify clear operation: ${message}`);
+              return;
+            }
+            if (marks.length) {
+              showToast(toastElement, 'Some marks could not be cleared; the map was refreshed from Supabase.');
+              return;
+            }
+            marks = marksBeforeClear;
           }
         }
 
+        snapshot();
         marks = [];
         refreshStatusUi();
         saveState();
@@ -1432,6 +1525,11 @@ if (authScreen && appRoot && authForm && authEmail && authPassword && authError)
       onSignOut: () => {
         currentUser = null;
         currentUserRole = 'viewer';
+        if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
+          setDuplicateCleanupAdmin(duplicateCleanupBackdrop, duplicateCleanupBtn, false);
+          duplicateCleanupBackdrop.style.display = 'none';
+          duplicateCleanupBackdrop.setAttribute('aria-hidden', 'true');
+        }
         showAuthScreen({ authScreen, appRoot, disabledScreen });
 
         // Unsubscribe from real-time and clear map canvas memory

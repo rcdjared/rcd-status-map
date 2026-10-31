@@ -1125,6 +1125,27 @@ body.role-viewer .chip input[type="color"] {
   border-bottom: 1px solid var(--bd);
 }
 
+.duplicate-cleanup-modal {
+  max-height: min(85vh, 760px);
+}
+
+.duplicate-cleanup-table-wrap {
+  max-height: 48vh;
+  overflow: auto;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+}
+
+.duplicate-cleanup-table {
+  min-width: 760px;
+}
+
+.duplicate-cleanup-table th {
+  position: sticky;
+  top: 0;
+  background: var(--sf);
+}
+
 .history-changer {
   font-family: monospace;
   color: var(--mu);

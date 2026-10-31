@@ -53,3 +53,16 @@ the v2 phase sequence.
   this work.
 - Remaining: verify dev setup; review production inspection results; create
   GitHub milestones/issues.
+
+### Phase 1 — Mark integrity (implementation in progress)
+
+- Repaint now updates the newest overlapping fill in place; erase, duplicate
+  removal, and clear wait for Supabase and report failures.
+- Added admin-only duplicate dry-run/confirm UI. Authenticated loads treat
+  Supabase as authoritative, including empty results; they do not restore stale
+  local marks when the remote project cannot be loaded.
+- `npm test` (3 tests), typecheck, lint, build, and `git diff --check` pass.
+  Build retains the existing large-chunk warning.
+- Pending dev manual verification: repaint keeps the same mark ID/history;
+  overlapping marks resolve to the newest; preview is dry-run and confirmed
+  cleanup deletes only duplicates. No database changes have been applied.

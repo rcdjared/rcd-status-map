@@ -72,6 +72,30 @@ export async function saveMark(
   }
 }
 
+export async function updateMark(
+  markId: string,
+  updates: Pick<MarkData, 'status' | 'updated_by'>
+): Promise<ApiResponse<MarkRow>> {
+  try {
+    const { data, error } = await supabase
+      .from('marks')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', markId)
+      .select()
+      .single();
+
+    if (error) {
+      return { data: null, error: new Error(error.message) };
+    }
+    return { data, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
 /**
  * Deletes a mark by its UUID.
  */
@@ -82,7 +106,9 @@ export async function deleteMark(
     const { error } = await supabase
       .from('marks')
       .delete()
-      .eq('id', markId);
+      .eq('id', markId)
+      .select('id')
+      .single();
 
     if (error) {
       return { data: null, error: new Error(error.message) };
@@ -102,18 +128,22 @@ export async function deleteMark(
  */
 export async function clearAllMarks(
   projectId: string
-): Promise<ApiResponse<{ project_id: string }>> {
+): Promise<ApiResponse<{ project_id: string; deleted_ids: string[] }>> {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('marks')
       .delete()
-      .eq('project_id', projectId);
+      .eq('project_id', projectId)
+      .select('id');
 
     if (error) {
       return { data: null, error: new Error(error.message) };
     }
 
-    return { data: { project_id: projectId }, error: null };
+    return {
+      data: { project_id: projectId, deleted_ids: data.map((row) => row.id) },
+      error: null,
+    };
   } catch (err) {
     return {
       data: null,

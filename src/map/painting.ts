@@ -1,5 +1,6 @@
 import type { Span } from './flood-fill';
 import { snap, region } from './flood-fill';
+import { newestMark } from './duplicate-marks';
 
 export type MarkType = 'f' | 'p';
 
@@ -10,6 +11,8 @@ export interface Mark {
   y: number;
   s: string; // status key (e.g. 'c' | 'o' | 'a')
   sp?: Span[];
+  updated_at?: string;
+  updated_by?: string | null;
 }
 
 export interface StatusConfig {
@@ -191,6 +194,8 @@ export interface PaintClickResult {
   actionTaken: boolean;
   addedMark?: Mark;
   erasedMark?: Mark;
+  erasedMarks?: Mark[];
+  updatedMark?: Mark;
 }
 
 /**
@@ -262,21 +267,29 @@ export function handleMapClick(
     };
   }
 
-  // Remove any existing fill mark that intersects with the same clicked spot
-  let erasedExisting: Mark | undefined;
-  const filtered = marks.filter((m) => {
-    if (m.t === 'f' && hit(m, q[0], q[1], pinRadius)) {
-      erasedExisting = m;
-      return false;
-    }
-    return true;
-  });
+  const intersecting = marks.filter(
+    (mark) => mark.t === 'f' && hit(mark, q[0], q[1], pinRadius)
+  );
+  if (intersecting.length) {
+    const keptMark = newestMark(intersecting);
+    const updatedMark: Mark = { ...keptMark, s: currentStatus, sp };
+    const erasedMarks = intersecting.filter((mark) => mark !== keptMark);
+    const updatedMarks = marks
+      .filter((mark) => !erasedMarks.includes(mark))
+      .map((mark) => (mark === keptMark ? updatedMark : mark));
+    return {
+      updatedMarks,
+      updatedMark,
+      erasedMarks,
+      actionTaken: true,
+    };
+  }
+
   const newMark: Mark = { t: 'f', x: q[0], y: q[1], s: currentStatus, sp };
 
   return {
-    updatedMarks: [...filtered, newMark],
+    updatedMarks: [...marks, newMark],
     addedMark: newMark,
-    erasedMark: erasedExisting,
     actionTaken: true,
   };
 }

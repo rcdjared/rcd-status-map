@@ -82,15 +82,32 @@ the v2 phase sequence.
 - User reports two-browser add/erase/status undo, reload persistence, and
   conflict refusal all passed.
 
-### Phase 3 — Access rules (migration drafted; dev verification pending)
+### Phase 3 — Access rules (dev verified; production pending)
 
 - UI/API review: editors and admins update `projects.legend_x`,
   `projects.legend_y`, and `projects.status_config`; admins create projects
   (`name`, `map_url`, initial legend coordinates) and delete projects. Map
   uploads write to the `maps` Storage bucket and are admin-only in the UI.
-- User confirmed this inventory. Added migration 013 and role-based verification
-  SQL; neither has been applied. `npm test` (4 tests), typecheck, lint, build,
-  and `git diff --check` pass. No database changes made.
+- User confirmed this inventory and reports migration 013 applied in dev.
+  Corrected denied-RLS assertions and removed direct Storage DELETE SQL; the
+  script checks the admin-scoped policy instead. Replaced its temporary
+  Storage fixture with a transaction-named object. User reports the corrected
+  verification passed.
+- Do not apply to production until migration history is reconciled.
 - Mark history remains cascade-deleted with its mark as before: mark deletion
   can remove its audit trail, preserving existing behavior but limiting audit
   retention for deleted marks.
+
+### Phase 4 — Register schema (drafted; dev application pending)
+
+- Added migration 014 and rollback-only role tests. The schema allows one row
+  per normalized project/phase/block/lot and at most one register row per mark.
+- Added same-project enforcement between a lot row and its linked mark; this
+  prevents direct API writes or project changes from creating cross-project
+  links, a case not covered in the original roadmap.
+- Status is intentionally free text; category changes must not invalidate
+  existing register data. Insert timestamps and actor fields are server-set.
+- Removed temporary-table dependence from the verification script after the
+  SQL Editor issue in Phase 3. Not applied to a database; rebuild dev through
+  migration 014, run its verification, and inspect expected objects before
+  starting Phase 5.

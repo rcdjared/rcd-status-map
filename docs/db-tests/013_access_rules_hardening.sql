@@ -1,11 +1,10 @@
 -- Phase 3 access rules and audit hardening verification.
 -- Run only against the development Supabase project, as one SQL Editor execution.
 -- Uses existing role profiles and a seeded project. Fixture writes roll back.
+-- Storage object deletion is verified through its RLS policy definition because
+-- Supabase blocks direct DELETE statements; use the Storage API for a manual check.
 
 begin;
-
-create temporary table phase3_storage_fixture (id uuid primary key) on commit drop;
-grant select, insert on phase3_storage_fixture to authenticated;
 
 -- Admin: project management and display-name RPC.
 select set_config(
@@ -58,7 +57,7 @@ begin
   end if;
 
   insert into storage.objects (bucket_id, name)
-  values ('maps', 'phase3-verification-' || gen_random_uuid()::text)
+  values ('maps', 'phase3-verification-' || txid_current()::text)
   returning id into v_storage_id;
   if v_storage_id is null then
     raise exception 'Admin could not create a maps storage object fixture';
@@ -70,7 +69,6 @@ begin
   if v_storage_result_id is distinct from v_storage_id then
     raise exception 'Admin could not update a maps storage object';
   end if;
-  insert into pg_temp.phase3_storage_fixture (id) values (v_storage_id);
 end;
 $$;
 reset role;
@@ -94,7 +92,6 @@ declare
   v_storage_id uuid;
   v_mark_id uuid;
   v_actor uuid;
-  v_history_id bigint;
   v_display_names bigint;
   v_legend_x real;
   v_legend_y real;
@@ -171,11 +168,14 @@ begin
     raise exception 'Editor changed project creation timestamp';
   end if;
 
-  v_result_id := null;
-  insert into public.projects (name, map_url)
-  values ('Editor project must be denied', '/phase3-denied')
-  returning id into v_result_id;
-  if v_result_id is not null then
+  v_blocked := false;
+  begin
+    insert into public.projects (name, map_url)
+    values ('Editor project must be denied', '/phase3-denied');
+  exception when insufficient_privilege then
+    v_blocked := true;
+  end;
+  if not v_blocked then
     raise exception 'Editor inserted a project';
   end if;
 
@@ -185,7 +185,14 @@ begin
     raise exception 'Editor deleted a project';
   end if;
 
-  v_storage_id := (select id from pg_temp.phase3_storage_fixture limit 1);
+  select id into v_storage_id
+  from storage.objects
+  where bucket_id = 'maps'
+    and name = 'phase3-verification-' || txid_current()::text || '-admin-update'
+  limit 1;
+  if v_storage_id is null then
+    raise exception 'Setup problem: admin Storage fixture is not visible to editor';
+  end if;
   v_result_id := null;
   update storage.objects
   set name = name || '-editor-update'
@@ -195,18 +202,15 @@ begin
     raise exception 'Editor updated a maps storage object';
   end if;
 
-  v_result_id := null;
-  insert into storage.objects (bucket_id, name)
-  values ('maps', 'phase3-editor-upload-' || gen_random_uuid()::text)
-  returning id into v_result_id;
-  if v_result_id is not null then
+  v_blocked := false;
+  begin
+    insert into storage.objects (bucket_id, name)
+    values ('maps', 'phase3-editor-upload-' || gen_random_uuid()::text);
+  exception when insufficient_privilege then
+    v_blocked := true;
+  end;
+  if not v_blocked then
     raise exception 'Editor inserted a maps storage object';
-  end if;
-
-  v_result_id := null;
-  delete from storage.objects where id = v_storage_id returning id into v_result_id;
-  if v_result_id is not null then
-    raise exception 'Editor deleted a maps storage object';
   end if;
 
   select count(*) into v_display_names
@@ -240,11 +244,14 @@ begin
     raise exception 'Mark history trigger did not record the editor status change';
   end if;
 
-  v_history_id := null;
-  insert into public.mark_history (mark_id, old_status, new_status, changed_by)
-  values (v_mark_id, 'forged-old', 'forged-new', auth.uid())
-  returning id into v_history_id;
-  if v_history_id is not null then
+  v_blocked := false;
+  begin
+    insert into public.mark_history (mark_id, old_status, new_status, changed_by)
+    values (v_mark_id, 'forged-old', 'forged-new', auth.uid());
+  exception when insufficient_privilege then
+    v_blocked := true;
+  end;
+  if not v_blocked then
     raise exception 'Editor inserted a mark-history row directly';
   end if;
 end;
@@ -267,6 +274,7 @@ declare
   v_project_id uuid;
   v_result_id uuid;
   v_project_count bigint;
+  v_blocked boolean;
 begin
   if auth.uid() is null
     or public.get_caller_role() is distinct from 'viewer'::public.app_role then
@@ -279,11 +287,14 @@ begin
   end if;
 
   select id into v_project_id from public.projects order by name, id limit 1;
-  v_result_id := null;
-  insert into public.projects (name, map_url)
-  values ('Viewer project must be denied', '/phase3-denied')
-  returning id into v_result_id;
-  if v_result_id is not null then
+  v_blocked := false;
+  begin
+    insert into public.projects (name, map_url)
+    values ('Viewer project must be denied', '/phase3-denied');
+  exception when insufficient_privilege then
+    v_blocked := true;
+  end;
+  if not v_blocked then
     raise exception 'Viewer inserted a project';
   end if;
 
@@ -335,34 +346,27 @@ end;
 $$;
 reset role;
 
--- Admin: map storage deletion remains permitted.
-select set_config(
-  'request.jwt.claim.sub',
-  coalesce(
-    (select id::text from public.profiles
-     where role = 'admin'::public.app_role order by id limit 1),
-    '00000000-0000-0000-0000-000000000000'
-  ),
-  true
-);
-set local role authenticated;
+-- Supabase prevents direct SQL deletes from storage.objects. Verify the
+-- admin-only DELETE policy definition here; exercise actual deletion through
+-- the Storage API in the app.
 do $$
 declare
-  v_storage_id uuid;
-  v_result_id uuid;
+  v_policy_count bigint;
 begin
-  if public.get_caller_role() is distinct from 'admin'::public.app_role then
-    raise exception 'Setup problem: no admin-role profile found';
+  select count(*) into v_policy_count
+  from pg_policies
+  where schemaname = 'storage'
+    and tablename = 'objects'
+    and policyname = 'Admins can delete map images'
+    and cmd = 'DELETE'
+    and coalesce(qual, '') ilike '%maps%'
+    and coalesce(qual, '') ilike '%admin%';
+  if v_policy_count <> 1 then
+    raise exception 'Storage DELETE policy is missing or is not admin/maps scoped';
   end if;
-
-  v_storage_id := (select id from pg_temp.phase3_storage_fixture limit 1);
-  delete from storage.objects where id = v_storage_id returning id into v_result_id;
-  if v_result_id is distinct from v_storage_id then
-    raise exception 'Admin could not delete a maps storage object';
-  end if;
+  raise notice 'PASS: Storage DELETE policy is admin/maps scoped';
 end;
 $$;
-reset role;
 
 rollback;
 

@@ -45,6 +45,20 @@ export interface MarkHistory {
   changed_at: string;
 }
 
+export interface LotRegisterRow {
+  id: string;
+  project_id: string;
+  mark_id: string | null;
+  phase: string;
+  block: string;
+  lot: string;
+  status: string;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type Json =
   | string
   | number
@@ -139,12 +153,59 @@ export interface Database {
         };
         Relationships: [];
       };
+      lot_register: {
+        Row: LotRegisterRow;
+        Insert: {
+          id?: string;
+          project_id: string;
+          mark_id?: string | null;
+          phase: string;
+          block: string;
+          lot: string;
+          status: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          mark_id?: string | null;
+          phase?: string;
+          block?: string;
+          lot?: string;
+          status?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      save_lot: {
+        Args: {
+          p_project_id: string;
+          p_mark_id: string | null;
+          p_phase: string;
+          p_block: string;
+          p_lot: string;
+          p_status: string;
+        };
+        Returns: LotRegisterRow[];
+      };
+      update_lot_status: {
+        Args: {
+          p_lot_id: string;
+          p_status: string;
+        };
+        Returns: LotRegisterRow[];
+      };
     };
     Enums: {
       [_ in never]: never;

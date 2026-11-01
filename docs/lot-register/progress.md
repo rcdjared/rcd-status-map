@@ -12,7 +12,7 @@ the v2 phase sequence.
 | 1 | Mark integrity | n/a | n/a | [ ] |
 | 2 | Persistent undo | n/a | n/a | [ ] |
 | 3 | Access rules and hardening | [ ] | [ ] | [ ] |
-| 4 | Register schema | [ ] | [ ] | [ ] |
+| 4 | Register schema | [x] | [ ] | [ ] |
 | 5 | Register API | [ ] | [ ] | [ ] |
 | 6 | Side panel form | n/a | n/a | [ ] |
 | 7 | Table view | n/a | n/a | [ ] |
@@ -98,7 +98,7 @@ the v2 phase sequence.
   can remove its audit trail, preserving existing behavior but limiting audit
   retention for deleted marks.
 
-### Phase 4 — Register schema (drafted; dev application pending)
+### Phase 4 — Register schema (dev verified; production pending)
 
 - Added migration 014 and rollback-only role tests. The schema allows one row
   per normalized project/phase/block/lot and at most one register row per mark.
@@ -108,6 +108,20 @@ the v2 phase sequence.
 - Status is intentionally free text; category changes must not invalidate
   existing register data. Insert timestamps and actor fields are server-set.
 - Removed temporary-table dependence from the verification script after the
-  SQL Editor issue in Phase 3. Not applied to a database; rebuild dev through
-  migration 014, run its verification, and inspect expected objects before
-  starting Phase 5.
+  SQL Editor issue in Phase 3.
+- User reports: `PASS: Phase 4 lot_register schema verified; all fixtures rolled back.`
+  Development verification is recorded as passed; production application and
+  PR merge remain outstanding. This report does not independently confirm
+  production state.
+
+### Phase 5 — Register API and atomic save (implementation in progress)
+
+- Added migration 015 with invoker-rights RPCs for atomic register/mark saves
+  and status updates, plus typed client API and rollback-only verification SQL.
+- Duplicate-PBL database errors map to `DuplicatePblError` with the conflicting
+  row ID.
+- `npm run build`, `npm run lint`, `npm test` (4 tests), and `git diff --check`
+  pass. The SQL verification was not run locally; PostgreSQL tooling and a live
+  database connection are unavailable in this workspace.
+- Not yet applied to dev. Apply and verify migrations 014-015 in dev before
+  considering Phase 5 complete; production remains untouched.

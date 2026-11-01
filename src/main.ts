@@ -76,6 +76,7 @@ import type { UndoAction } from './map/undo';
 import {
   loadClearRecoverySnapshot,
   removeClearRecoverySnapshot,
+  mergeClearRecoverySnapshots,
   saveClearRecoverySnapshot,
   type ClearRecoverySnapshot,
 } from './map/clear-recovery';
@@ -278,7 +279,7 @@ const lotPanel = initLotPanel(stage, {
 
     marks = marks.filter((mark) => mark.id !== context.markId);
     history = history
-      .map((action) => withoutAddedMark(action, context.markId))
+      .map((action) => withoutMark(action, context.markId))
       .filter((action): action is UndoAction => action !== null);
     refreshStatusUi();
     saveState();
@@ -308,7 +309,41 @@ const lotTable = initLotTable(stage, lotTableButton, {
     return updated;
   },
   onDeleteRow: async (row) => {
-    await deleteLot(row.id);
+    const markId = row.mark_id;
+    if (markId) {
+      const { error } = await deleteMark(markId);
+      if (error) throw error;
+
+      marks = marks.filter((mark) => mark.id !== markId);
+      history = history
+        .map((action) => withoutMark(action, markId))
+        .filter((action): action is UndoAction => action !== null);
+      refreshStatusUi();
+      saveState();
+    }
+
+    try {
+      await deleteLot(row.id);
+    } catch (error) {
+      if (markId && currentProjectId) {
+        try {
+          lotRows = await listLots(currentProjectId);
+          lotTable.setRows(lotRows);
+        } catch (refreshError) {
+          const deleteMessage = error instanceof Error ? error.message : String(error);
+          const refreshMessage =
+            refreshError instanceof Error ? refreshError.message : String(refreshError);
+          throw new Error(
+            `The linked map mark was removed, but the register entry could not be deleted: ${deleteMessage}. Refreshing the register also failed: ${refreshMessage}`
+          );
+        }
+        throw new Error(
+          `The linked map mark was removed, but the register entry could not be deleted: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      throw error;
+    }
+
     lotRows = lotRows.filter((candidate) => candidate.id !== row.id);
     lotTable.setRows(lotRows);
     showToast(toastElement, `Register entry ${row.phase}/${row.block}/${row.lot} deleted.`);
@@ -420,6 +455,25 @@ function markFromRow(row: MarkRow): Mark | null {
   return mark.t === 'p' || mark.sp ? mark : null;
 }
 
+function markForClearRecovery(row: MarkRow): Mark {
+  const x = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+  const y = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+  const mark: Mark = {
+    id: row.id,
+    t: row.kind === 'pin' ? 'p' : 'f',
+    x,
+    y,
+    s: row.status,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+  };
+  if (mark.t === 'f' && barrierMap) {
+    const spans = region(x, y, mapWidth, mapHeight, barrierMap);
+    if (spans) mark.sp = spans;
+  }
+  return mark;
+}
+
 async function reloadMarksFromSupabase(projectId: string): Promise<void> {
   const { data, error } = await loadMarks(projectId);
   if (error || !data) {
@@ -477,11 +531,28 @@ function recordUndo(action: UndoAction): void {
   }
 }
 
-function withoutAddedMark(action: UndoAction, markId: string): UndoAction | null {
-  if (action.kind === 'add' && action.mark.id === markId) return null;
+function withoutMark(action: UndoAction, markId: string): UndoAction | null {
+  if (action.kind === 'add') return action.mark.id === markId ? null : action;
+  if (action.kind === 'erase') {
+    const marks = action.marks.filter((mark) => mark.id !== markId);
+    return marks.length ? { ...action, marks } : null;
+  }
+  if (action.kind === 'clear') {
+    const marks = action.snapshot.marks.filter((mark) => mark.id !== markId);
+    if (!marks.length) return null;
+    return {
+      ...action,
+      snapshot: {
+        ...action.snapshot,
+        marks,
+        lots: action.snapshot.lots.filter((row) => row.mark_id !== markId),
+      },
+    };
+  }
+  if (action.kind === 'status') return action.markId === markId ? null : action;
   if (action.kind !== 'batch') return action;
   const actions = action.actions
-    .map((child) => withoutAddedMark(child, markId))
+    .map((child) => withoutMark(child, markId))
     .filter((child): child is UndoAction => child !== null);
   return actions.length ? { ...action, actions } : null;
 }
@@ -1347,6 +1418,11 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
     return;
   }
 
+  if (currentMode === 'fill' && result.addedMark && lotPanel.isOpen()) {
+    const dismissed = await lotPanel.dismiss();
+    if (!dismissed) return;
+  }
+
   if (result.actionTaken) {
     const shouldPersist = Boolean(currentUser && currentProjectId);
     let remoteChanged = false;
@@ -1909,86 +1985,107 @@ initActionButtons(
       if (currentUserRole !== 'admin' && currentUserRole !== 'editor') {
         return;
       }
-      if (marks.length > 0) {
-        try {
-          if (loadClearRecoverySnapshot(localStorage, getClearRecoveryScope())) {
-            showToast(
-              toastElement,
-              'Restore the previous clear before clearing again so its recovery snapshot is not replaced.'
-            );
-            return;
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          showToast(toastElement, `Cannot safely clear the map: ${message}`);
+      let marksBeforeClear: Mark[];
+      if (currentUser && currentProjectId) {
+        const { data, error } = await loadMarks(currentProjectId);
+        if (error || !data) {
+          showToast(
+            toastElement,
+            `Could not load the current map marks: ${error?.message ?? 'No mark data was returned.'}`
+          );
           return;
         }
-
-        if (!window.confirm(
-          `Clear all ${marks.length} map marks? A recovery copy will be saved, and Lot Register rows will remain.`
-        )) {
-          return;
-        }
-
-        const marksBeforeClear = marks.map((mark) => ({
+        marksBeforeClear = data.map(markForClearRecovery);
+      } else {
+        marksBeforeClear = marks.map((mark) => ({
           ...mark,
           sp: mark.sp?.map((span) => [...span] as [number, number, number]),
         }));
-        const markIds = new Set(
-          marksBeforeClear.map((mark) => mark.id).filter((id): id is string => Boolean(id))
-        );
-        const lotsBeforeClear = lotRows
-          .filter((row) => row.mark_id && markIds.has(row.mark_id))
-          .map((row) => ({ ...row }));
-        const snapshot: ClearRecoverySnapshot = {
-          scope: getClearRecoveryScope(),
-          clearedAt: new Date().toISOString(),
-          marks: marksBeforeClear,
-          lots: lotsBeforeClear,
-        };
-        try {
-          saveClearRecoverySnapshot(localStorage, snapshot);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          showToast(toastElement, `Could not save a recovery copy; the map was not cleared: ${message}`);
+      }
+
+      if (!marksBeforeClear.length) {
+        marks = [];
+        refreshStatusUi();
+        saveState();
+        showToast(toastElement, 'There are no map marks to clear.');
+        return;
+      }
+
+      let previousSnapshot: ClearRecoverySnapshot | null;
+      try {
+        previousSnapshot = loadClearRecoverySnapshot(localStorage, getClearRecoveryScope());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        showToast(toastElement, `Cannot safely clear the map: ${message}`);
+        return;
+      }
+
+      if (!window.confirm(
+        `Clear all ${marksBeforeClear.length} map marks? A recovery copy will be saved, and Lot Register rows will remain.`
+      )) {
+        return;
+      }
+
+      const markIds = new Set(
+        marksBeforeClear.map((mark) => mark.id).filter((id): id is string => Boolean(id))
+      );
+      const lotsBeforeClear = lotRows
+        .filter((row) => row.mark_id && markIds.has(row.mark_id))
+        .map((row) => ({ ...row }));
+      const currentSnapshot: ClearRecoverySnapshot = {
+        scope: getClearRecoveryScope(),
+        clearedAt: new Date().toISOString(),
+        marks: marksBeforeClear,
+        lots: lotsBeforeClear,
+      };
+      const snapshot = mergeClearRecoverySnapshots(previousSnapshot, currentSnapshot);
+      try {
+        saveClearRecoverySnapshot(localStorage, snapshot);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        showToast(toastElement, `Could not save a recovery copy; the map was not cleared: ${message}`);
+        return;
+      }
+
+      if (currentUser && currentProjectId) {
+        const { error } = await clearAllMarks(currentProjectId);
+        if (error) {
+          updateClearRecoveryButton();
+          showToast(toastElement, `Could not clear map: ${error.message}`);
           return;
         }
 
-        if (currentUser && currentProjectId) {
-          const { data, error } = await clearAllMarks(currentProjectId);
-          if (error) {
-            updateClearRecoveryButton();
-            showToast(toastElement, `Could not clear map: ${error.message}`);
-            return;
-          }
-          const savedIds = new Set(data?.deleted_ids || []);
-          if (marksBeforeClear.some((mark) => mark.id && !savedIds.has(mark.id))) {
-            try {
-              await reloadMarksFromSupabase(currentProjectId);
-            } catch (syncError) {
-              const message =
-                syncError instanceof Error ? syncError.message : String(syncError);
-              updateClearRecoveryButton();
-              showToast(toastElement, `Could not verify clear operation: ${message}`);
-              return;
-            }
-            if (marks.length) {
-              updateClearRecoveryButton();
-              showToast(toastElement, 'Some marks could not be cleared; the map was refreshed from Supabase.');
-              return;
-            }
-            marks = marksBeforeClear;
-          }
+        const { data, error: verifyError } = await loadMarks(currentProjectId);
+        if (verifyError || !data) {
+          updateClearRecoveryButton();
+          showToast(
+            toastElement,
+            `Clear was sent, but its result could not be verified: ${verifyError?.message ?? 'No mark data was returned.'}. The recovery copy is available.`
+          );
+          return;
         }
-
-        history = [];
-        marks = [];
-        recordUndo({ kind: 'clear', snapshot });
-        refreshStatusUi();
-        saveState();
-        updateClearRecoveryButton();
-        showActionToast(toastElement, 'Map cleared. A recovery copy is available.', 'Undo', async () => undo(), 10000);
+        if (data.length) {
+          marks = data
+            .map(markFromRow)
+            .filter((mark): mark is Mark => mark !== null);
+          refreshStatusUi();
+          saveState();
+          updateClearRecoveryButton();
+          showToast(
+            toastElement,
+            `Could not clear all marks; ${data.length} remain on the map. The recovery copy is available.`
+          );
+          return;
+        }
       }
+
+      history = [];
+      marks = [];
+      recordUndo({ kind: 'clear', snapshot });
+      refreshStatusUi();
+      saveState();
+      updateClearRecoveryButton();
+      showActionToast(toastElement, 'Map cleared. A recovery copy is available.', 'Undo', async () => undo(), 10000);
     },
     onZoomOut: () => setZoom(0.8),
     onZoomIn: () => setZoom(1.25),
@@ -2070,6 +2167,15 @@ initKeyboardShortcuts({
   onSetMode: (mode) => {
     if (currentUserRole === 'admin' || currentUserRole === 'editor') {
       void setMode(mode);
+    }
+  },
+  onToggleLotTable: () => {
+    if (
+      stage.style.display !== 'none' &&
+      lotTableButton.style.display !== 'none' &&
+      lotTableButton.getClientRects().length > 0
+    ) {
+      lotTableButton.click();
     }
   },
 });

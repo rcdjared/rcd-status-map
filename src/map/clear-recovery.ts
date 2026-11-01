@@ -10,6 +10,34 @@ export interface ClearRecoverySnapshot {
 
 export type ClearRecoveryStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
+export function mergeClearRecoverySnapshots(
+  previous: ClearRecoverySnapshot | null,
+  current: ClearRecoverySnapshot
+): ClearRecoverySnapshot {
+  if (!previous) return current;
+  if (previous.scope !== current.scope) {
+    throw new Error('Cannot merge clear recovery data from different projects.');
+  }
+
+  const marks = new Map<string, Mark>();
+  const markKey = (mark: Mark): string =>
+    mark.id ?? `${mark.t}:${mark.x}:${mark.y}:${mark.s}`;
+  for (const mark of previous.marks) marks.set(markKey(mark), mark);
+  for (const mark of current.marks) marks.set(markKey(mark), mark);
+
+  const lots = new Map<string, LotRegisterRow>();
+  const lotKey = (lot: LotRegisterRow): string =>
+    lot.id || `${lot.project_id}:${lot.phase}:${lot.block}:${lot.lot}`;
+  for (const lot of previous.lots) lots.set(lotKey(lot), lot);
+  for (const lot of current.lots) lots.set(lotKey(lot), lot);
+
+  return {
+    ...current,
+    marks: [...marks.values()],
+    lots: [...lots.values()],
+  };
+}
+
 const STORAGE_PREFIX = 'rrh-clear-recovery-v1-';
 
 function isRecord(value: unknown): value is Record<string, unknown> {

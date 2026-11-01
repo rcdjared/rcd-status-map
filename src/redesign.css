@@ -185,9 +185,9 @@ input:focus-visible,
   right: 14px;
   display: flex;
   flex-direction: column;
-  width: min(760px, calc(100% - 28px));
+  width: min(620px, calc(100% - 28px));
   max-height: calc(100% - 28px);
-  padding: 16px;
+  padding: 12px;
   overflow: hidden;
   color: var(--tx);
   background: var(--sf);
@@ -203,26 +203,26 @@ input:focus-visible,
 
 .lot-table-header {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .lot-table-header h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
 }
 
 .lot-table-count {
-  margin: 4px 0 0;
+  margin: 0;
   color: var(--mu);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .lot-table-close {
   flex: 0 0 auto;
   min-width: 64px;
-  min-height: 36px;
+  min-height: 32px;
   padding: 0 12px;
   border: 1px solid var(--bd);
   border-radius: 8px;
@@ -246,10 +246,10 @@ input:focus-visible,
 
 .lot-table-filters {
   display: grid;
-  grid-template-columns: repeat(3, minmax(100px, 1fr)) minmax(180px, 1.5fr);
+  grid-template-columns: repeat(3, minmax(88px, 1fr)) minmax(160px, 1.5fr);
   align-items: end;
-  gap: 8px;
-  margin: 14px 0 10px;
+  gap: 7px;
+  margin: 10px 0 8px;
 }
 
 .lot-table-filters label {
@@ -264,8 +264,8 @@ input:focus-visible,
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 0 9px;
+  height: 32px;
+  padding: 0 8px;
   color: var(--tx);
   background: var(--bg);
   border: 1px solid var(--bd);
@@ -284,16 +284,16 @@ input:focus-visible,
   display: flex;
   justify-content: flex-end;
   flex: 0 0 auto;
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--bd);
 }
 
 .lot-table-scroll table {
   width: 100%;
-  min-width: 640px;
+  min-width: 520px;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .lot-table-scroll th {
@@ -308,7 +308,7 @@ input:focus-visible,
 
 .lot-table-scroll th button {
   width: 100%;
-  padding: 9px 10px;
+  padding: 7px 8px;
   color: var(--tx);
   border: 0;
   background: transparent;
@@ -327,7 +327,7 @@ input:focus-visible,
 }
 
 .lot-table-scroll td {
-  padding: 7px 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--bd);
 }
 

@@ -197,20 +197,19 @@ export async function deleteMark(
  */
 export async function clearAllMarks(
   projectId: string
-): Promise<ApiResponse<{ project_id: string; deleted_ids: string[] }>> {
+): Promise<ApiResponse<{ project_id: string }>> {
   try {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('marks')
       .delete()
-      .eq('project_id', projectId)
-      .select('id');
+      .eq('project_id', projectId);
 
     if (error) {
       return { data: null, error: new Error(error.message) };
     }
 
     return {
-      data: { project_id: projectId, deleted_ids: data.map((row) => row.id) },
+      data: { project_id: projectId },
       error: null,
     };
   } catch (err) {

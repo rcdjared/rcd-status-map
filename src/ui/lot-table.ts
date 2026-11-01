@@ -14,6 +14,19 @@ export function compareNatural(left: string, right: string): number {
   return naturalCollator.compare(left, right);
 }
 
+export function matchesPblSearch(
+  row: Pick<LotRegisterRow, 'phase' | 'block' | 'lot'>,
+  query: string
+): boolean {
+  const terms = query.toLocaleLowerCase().split(/[\s,/]+/).filter(Boolean);
+  if (!terms.length) return true;
+
+  const fields = [row.phase, row.block, row.lot].map((value) =>
+    value.toLocaleLowerCase()
+  );
+  return terms.every((term) => fields.some((field) => field.includes(term)));
+}
+
 export interface LotTableCallbacks {
   onSelectRow: (row: LotRegisterRow) => void;
   onUpdateStatus: (row: LotRegisterRow, status: string) => Promise<LotRegisterRow>;
@@ -41,23 +54,15 @@ export function initLotTable(
     'beforeend',
     `<section class="lot-table-panel" aria-labelledby="lot-table-title" hidden>
       <header class="lot-table-header">
-        <div>
-          <h2 id="lot-table-title">Lot register</h2>
-          <p class="lot-table-count" aria-live="polite"></p>
-        </div>
-        <button
-          type="button"
-          class="lot-table-close"
-          title="Close lot register"
-          aria-label="Close lot register"
-        >Close</button>
+        <h2 id="lot-table-title">Lot register</h2>
+        <p class="lot-table-count" aria-live="polite"></p>
       </header>
       <div class="lot-table-filters">
         <label>Phase <select data-filter="phase"><option value="">All phases</option></select></label>
         <label>Block <select data-filter="block"><option value="">All blocks</option></select></label>
         <label>Status <select data-filter="status"><option value="">All statuses</option></select></label>
-        <label class="lot-table-search">Search PBL
-          <input type="search" placeholder="Search phase, block, or lot" autocomplete="off">
+        <label class="lot-table-search">Search lots
+          <input type="search" placeholder="Phase, block, or lot (e.g. 1 5 12)" autocomplete="off">
         </label>
       </div>
       <div class="lot-table-scroll">
@@ -85,7 +90,7 @@ export function initLotTable(
     close();
     return true;
   });
-  const closeButtons = panel.querySelectorAll<HTMLButtonElement>('.lot-table-close');
+  const closeButton = panel.querySelector<HTMLButtonElement>('.lot-table-close')!;
   const count = panel.querySelector<HTMLElement>('.lot-table-count')!;
   const tbody = panel.querySelector<HTMLTableSectionElement>('tbody')!;
   const empty = panel.querySelector<HTMLElement>('.lot-table-empty')!;
@@ -149,19 +154,13 @@ export function initLotTable(
     const phase = filters.get('phase')!.value;
     const block = filters.get('block')!.value;
     const status = filters.get('status')!.value;
-    const query = search.value.trim().toLocaleLowerCase();
+    const query = search.value.trim();
     return rows
       .filter((row) => {
         if (phase && row.phase !== phase) return false;
         if (block && row.block !== block) return false;
         if (status && row.status !== status) return false;
-        if (
-          query &&
-          !`${row.phase} ${row.block} ${row.lot}`.toLocaleLowerCase().includes(query)
-        ) {
-          return false;
-        }
-        return true;
+        return matchesPblSearch(row, query);
       })
       .sort((left, right) => {
         const comparison = compareNatural(left[sortColumn], right[sortColumn]);
@@ -321,7 +320,7 @@ export function initLotTable(
           });
           addAction('Delete', 'delete', 'lot-table-action-delete', async (button) => {
             if (!window.confirm(
-              `Delete register entry ${row.phase}/${row.block}/${row.lot}?${row.mark_id ? ' Its map fill will remain.' : ''}`
+              `Delete register entry ${row.phase}/${row.block}/${row.lot}?${row.mark_id ? ' Its linked map mark will also be removed.' : ''}`
             )) {
               return;
             }
@@ -344,7 +343,6 @@ export function initLotTable(
       const selectRow = (): void => {
         if (isEditing) return;
         callbacks.onSelectRow(row);
-        close();
       };
       tr.addEventListener('click', selectRow);
       tr.addEventListener('keydown', (event) => {
@@ -383,7 +381,7 @@ export function initLotTable(
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(render, 100);
   });
-  closeButtons.forEach((button) => button.addEventListener('click', close));
+  closeButton.addEventListener('click', close);
   panel.addEventListener('pointerdown', (event) => event.stopPropagation());
   panel.addEventListener('click', (event) => event.stopPropagation());
   panel.addEventListener('keydown', (event) => {
@@ -407,7 +405,7 @@ export function initLotTable(
     if (!panel.hidden) {
       updateFilters();
       render();
-      panel.querySelector<HTMLButtonElement>('.lot-table-close')?.focus();
+      search.focus();
     }
   });
 

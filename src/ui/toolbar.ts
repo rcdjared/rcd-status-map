@@ -25,6 +25,7 @@ export interface ShortcutCallbacks {
   onUndo: () => void;
   onSelectStatusIndex: (index: number) => void;
   onSetMode: (mode: PaintMode) => void;
+  onToggleLotTable: () => void;
 }
 
 /**
@@ -166,6 +167,12 @@ export function initActionButtons(
  */
 export function initKeyboardShortcuts(callbacks: ShortcutCallbacks): () => void {
   const handler = (e: KeyboardEvent) => {
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      callbacks.onToggleLotTable();
+      return;
+    }
+
     const target = e.target;
     if (
       target instanceof HTMLElement &&

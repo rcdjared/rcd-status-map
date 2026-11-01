@@ -22,6 +22,7 @@ function createActionIcon(paths: string[]): SVGSVGElement {
 }
 
 export interface ChipCallbacks {
+  selectable?: boolean;
   onSelect: (key: string) => void;
   onColorChange: (key: string, color: string) => void;
   onRename: (key: string) => void;
@@ -88,8 +89,8 @@ export function renderChips(
     const chip = document.createElement('div');
     chip.className = 'chip';
     chip.dataset.k = key;
-    chip.tabIndex = 0;
-    if (index < 10) {
+    chip.tabIndex = callbacks.selectable === false ? -1 : 0;
+    if (callbacks.selectable !== false && index < 10) {
       const shortcut = index === 9 ? '0' : String(index + 1);
       chip.title = `Press ${shortcut} to select ${status.n}`;
       const shortcutHint = document.createElement('kbd');
@@ -161,9 +162,11 @@ export function renderChips(
       callbacks.onRemove(key);
     });
 
-    chip.addEventListener('click', () => {
-      callbacks.onSelect(key);
-    });
+    if (callbacks.selectable !== false) {
+      chip.addEventListener('click', () => {
+        callbacks.onSelect(key);
+      });
+    }
 
     chip.appendChild(label);
     chip.appendChild(count);

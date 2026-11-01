@@ -75,6 +75,39 @@
             <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
           </svg>Users
         </button>
+        <button type="button" id="btn-lot-table" class="nav-tab rail-action" aria-expanded="false" aria-controls="lot-table-panel" style="display: none;" title="Open lot register">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5z"></path>
+            <path d="M4 6h13M8 3v17M12 10h4M12 14h4"></path>
+          </svg>Lots
+        </button>
+        <details class="status-manager rail-action">
+          <summary class="nav-tab" title="Manage lot statuses">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M4 5h16v14H4zM8 9h8M8 13h5M8 16h3"></path>
+              <path d="M18 3v4M16 5h4"></path>
+            </svg>Status
+          </summary>
+          <div class="status-manager-panel">
+            <button type="button" id="btn-add-status" class="admin-only map-action-btn" title="Add a lot status" style="display: none;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"></path>
+              </svg><span>Add status</span>
+            </button>
+            <div id="chips" role="group" aria-label="Status label and color management"></div>
+          </div>
+        </details>
+        <button type="button" id="btn-upload-map" class="nav-tab rail-action admin-only" title="Upload new map (PDF, PNG, JPG)" style="display: none;">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <path d="m7 10 5-5 5 5M12 5v12"></path>
+          </svg>Add map
+        </button>
+        <button type="button" id="btn-delete-map" class="nav-tab rail-action admin-only" title="Delete current map" aria-label="Delete current map" style="display: none;">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M4 7h16M10 11v6M14 11v6M5 7l1 14h12l1-14M9 7V4h6v3"></path>
+          </svg>Delete map
+        </button>
       </nav>
       <div class="rail-foot">
         <button type="button" class="theme-toggle-btn" aria-label="Toggle theme">
@@ -94,47 +127,60 @@
           <span id="role-badge" class="badge badge-viewer">Viewer Mode</span>
         </div>
         <div class="header-controls" id="header-controls">
-          <div class="map-select-group">
+          <div class="map-select-group" role="group" aria-label="Project selection">
             <select id="mp" aria-label="Select subdivision project"></select>
-            <button type="button" id="btn-upload-map" class="admin-only map-action-btn" title="Upload new map (PDF, PNG, JPG)" style="display: none;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
-              </svg><span>Add map</span>
-            </button>
-            <button type="button" id="btn-delete-map" class="admin-only map-action-btn btn-danger-icon" title="Delete current map" style="display: none;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-            </button>
           </div>
-          <div class="g" id="chips"></div>
-          <div class="g" id="action-tools">
-            <button id="un" title="Undo (Ctrl+Z)">Undo</button>
-            <button id="cl" title="Clear all">Clear</button>
-            <button id="zo" title="Zoom out">−</button>
-            <button id="zi" title="Zoom in">+</button>
-            <button id="zf" title="Fit to screen">Fit</button>
-            <details class="export-menu">
-              <summary title="Export or download map" aria-label="Export or download map">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
+          <div class="map-toolbar-row" role="group" aria-label="Map tools and view actions">
+            <div class="g" id="edit-tools" role="group" aria-label="Map tools">
+              <button data-m="fill" class="on" title="Paint lot (F)" aria-label="Paint lot">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"></path><path d="m12 6 6 6"></path></svg>
+              </button>
+              <button data-m="pin" title="Temporary status pin: uses the selected status color, is shared until erased, and never changes Lot Register (P)" aria-label="Place temporary status pin; does not change Lot Register">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+              </button>
+              <button data-m="erase" title="Erase (E)" aria-label="Erase marks">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 14 8-8a2 2 0 0 1 3 0l7 7-7 7H8z"></path><path d="m8 20 6-6"></path></svg>
+              </button>
+              <button data-m="lg" title="Move legend" aria-label="Move legend">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5M8 16h3"></path><path d="M12 2v3M12 19v3M2 12h2M20 12h2"></path></svg>
+              </button>
+            </div>
+            <div class="g" id="action-tools" role="group" aria-label="Map actions">
+              <button id="un" title="Undo (Ctrl+Z)" aria-label="Undo">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10a6 6 0 0 1 0 12h-2"></path></svg>
+              </button>
+              <button id="zo" title="Zoom out" aria-label="Zoom out">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5M7.5 10.5h6"></path></svg>
+              </button>
+              <button id="zi" title="Zoom in" aria-label="Zoom in">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5M7.5 10.5h6M10.5 7.5v6"></path></svg>
+              </button>
+              <button id="zf" title="Fit to screen" aria-label="Fit map to screen">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"></path><path d="M9 9h6v6H9z"></path></svg>
+              </button>
+              <details class="export-menu">
+                <summary title="Export or download map" aria-label="Export or download map">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                </summary>
+                <div class="export-menu-panel">
+                  <button type="button" id="png" title="Export PNG">PNG image</button>
+                  <button type="button" id="pdf" title="Export PDF">PDF document</button>
+                </div>
+              </details>
+            </div>
+            <details class="clear-menu">
+              <summary title="Destructive map actions" aria-label="Destructive map actions">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 14h12l1-14M9 7V4h6v3"></path></svg>
               </summary>
-              <div class="export-menu-panel">
-                <button type="button" id="png" title="Export PNG">PNG image</button>
-                <button type="button" id="pdf" title="Export PDF">PDF document</button>
+              <div class="clear-menu-panel">
+                <button type="button" id="cl" class="clear-map-action">Clear map…</button>
+                <button type="button" id="restore-clear" hidden>Restore last clear</button>
               </div>
             </details>
-          </div>
-          <div class="g" id="edit-tools">
-            <button data-m="fill" class="on" title="Paint lot (F)">Paint</button>
-            <button data-m="pin" title="Pin (P)">Pin</button>
-            <button data-m="erase" title="Erase (E)">Erase</button>
-            <button data-m="lg" title="Move legend">Legend</button>
           </div>
         </div>
       </header>
@@ -158,6 +204,7 @@
         <label for="legend-name-input">Label</label>
         <input id="legend-name-input" type="text" maxlength="28" placeholder="e.g. Completed" />
       </div>
+
       <div class="legend-editor-field">
         <label for="legend-color-input">Color</label>
         <input id="legend-color-input" type="color" value="#1f9d55" />

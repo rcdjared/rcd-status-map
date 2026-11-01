@@ -25,6 +25,7 @@ export interface ShortcutCallbacks {
   onUndo: () => void;
   onSelectStatusIndex: (index: number) => void;
   onSetMode: (mode: PaintMode) => void;
+  onToggleLotTable: () => void;
 }
 
 /**
@@ -51,15 +52,16 @@ export function setToolbarMode(
 export function initModeButtons(
   buttons: HTMLElement[],
   initialMode: PaintMode,
-  onModeChange: (mode: PaintMode) => void,
+  onModeChange: (mode: PaintMode) => void | boolean | Promise<void | boolean>,
   boxElement?: HTMLElement | null
 ): void {
   buttons.forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const mode = btn.dataset.m as PaintMode | undefined;
       if (mode) {
+        const accepted = await onModeChange(mode);
+        if (accepted === false) return;
         setToolbarMode(buttons, mode, boxElement);
-        onModeChange(mode);
       }
     });
   });
@@ -94,11 +96,47 @@ export function initActionButtons(
   buttons: ActionButtons,
   callbacks: ActionCallbacks
 ): void {
+  const repositionMenu = (
+    menu: HTMLDetailsElement | null,
+    panelSelector: string
+  ): void => {
+    if (!menu?.open) return;
+    const summary = menu.querySelector<HTMLElement>('summary');
+    const panel = menu.querySelector<HTMLElement>(panelSelector);
+    if (!summary || !panel) return;
+
+    const bounds = summary.getBoundingClientRect();
+    const left = Math.max(
+      8,
+      Math.min(bounds.right - panel.offsetWidth, window.innerWidth - panel.offsetWidth - 8)
+    );
+    const below = bounds.bottom + 6;
+    const top = below + panel.offsetHeight <= window.innerHeight - 8
+      ? below
+      : Math.max(8, bounds.top - panel.offsetHeight - 6);
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  };
+
+  const exportMenu = buttons.savePng?.closest<HTMLDetailsElement>('.export-menu') ?? null;
+  const clearMenu = buttons.clear?.closest<HTMLDetailsElement>('.clear-menu') ?? null;
+  const repositionPopovers = (): void => {
+    repositionMenu(exportMenu, '.export-menu-panel');
+    repositionMenu(clearMenu, '.clear-menu-panel');
+  };
+  exportMenu?.addEventListener('toggle', () => repositionPopovers());
+  clearMenu?.addEventListener('toggle', () => repositionPopovers());
+  window.addEventListener('resize', repositionPopovers);
+  window.addEventListener('scroll', repositionPopovers, true);
+
   if (buttons.undo && callbacks.onUndo) {
     buttons.undo.addEventListener('click', callbacks.onUndo);
   }
   if (buttons.clear && callbacks.onClear) {
-    buttons.clear.addEventListener('click', callbacks.onClear);
+    buttons.clear.addEventListener('click', () => {
+      buttons.clear?.closest('details')?.removeAttribute('open');
+      callbacks.onClear?.();
+    });
   }
   if (buttons.zoomOut && callbacks.onZoomOut) {
     buttons.zoomOut.addEventListener('click', callbacks.onZoomOut);
@@ -129,6 +167,12 @@ export function initActionButtons(
  */
 export function initKeyboardShortcuts(callbacks: ShortcutCallbacks): () => void {
   const handler = (e: KeyboardEvent) => {
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      callbacks.onToggleLotTable();
+      return;
+    }
+
     const target = e.target;
     if (
       target instanceof HTMLElement &&

@@ -1,15 +1,17 @@
 name: Deploy Supabase Migrations
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'supabase/migrations/**'
   workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Confirm that the production database is backed up and ready for pending migrations
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   deploy-migrations:
+    if: ${{ inputs.confirm_production }}
     name: Run Database Migrations
     runs-on: ubuntu-latest
 

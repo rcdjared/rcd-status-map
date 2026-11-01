@@ -34,13 +34,36 @@ import type { User } from '@supabase/supabase-js';
 import {
   supabase,
   getUserRole,
+  loadProjectLegendPosition,
   loadProjectStatusConfig,
   saveProjectStatusConfig,
+  saveProjectLegendPosition,
   subscribeToProjectStatusConfig,
   type Project,
   type ProjectStatusConfig,
 } from './api/supabase';
-import { loadMarks, saveMark, deleteMark, clearAllMarks, subscribeToMarks } from './api/marks';
+import {
+  loadMarks,
+  saveMark,
+  updateMark,
+  undoStatusChange,
+  deleteMark,
+  clearAllMarks,
+  subscribeToMarks,
+} from './api/marks';
+import type { LotRegisterRow, MarkRow } from './api/supabase';
+import {
+  listLots,
+  saveLot,
+  subscribeLots,
+  deleteLot,
+  getDisplayNames,
+  listLotHistory,
+  restoreLotHistory,
+  updateLotDetails,
+  updateLotStatus,
+  undoLotStatus,
+} from './api/lotRegister';
 import { loadProjects, loadProjectMapImage, populateProjectSelect } from './api/projects';
 import {
   initAuth,
@@ -49,9 +72,17 @@ import {
   showDisabledScreen,
 } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
-import { showToast } from './ui/toast';
+import { showActionToast, showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
 import { initMapModals } from './ui/map-modals';
+import type { UndoAction } from './map/undo';
+import {
+  loadClearRecoverySnapshot,
+  removeClearRecoverySnapshot,
+  mergeClearRecoverySnapshots,
+  saveClearRecoverySnapshot,
+  type ClearRecoverySnapshot,
+} from './map/clear-recovery';
 import { initTheme } from './ui/theme';
 import {
   initActionButtons,
@@ -60,6 +91,12 @@ import {
   initModeButtons,
   setToolbarMode,
 } from './ui/toolbar';
+import { buildLotCsv, downloadBlob, exportLotsToXlsx } from './register/summary.ts';
+import { initLotPanel } from './ui/lot-panel';
+import { initLotTable } from './ui/lot-table';
+import { initEscapeDismissal, registerEscapeDismissable } from './ui/escape-dismiss';
+
+initEscapeDismissal();
 
 // DOM Elements
 const baseCanvas = document.querySelector<HTMLCanvasElement>('#base')!;
@@ -71,8 +108,11 @@ const box = document.querySelector<HTMLElement>('#box')!;
 const stage = document.querySelector<HTMLElement>('#stage')!;
 const chipsContainer = document.querySelector<HTMLElement>('#chips')!;
 const mapSelect = document.querySelector<HTMLSelectElement>('#mp')!;
+const lotTableButton = document.querySelector<HTMLButtonElement>('#btn-lot-table')!;
+const restoreClearButton = document.querySelector<HTMLButtonElement>('#restore-clear')!;
 const btnUploadMap = document.querySelector<HTMLButtonElement>('#btn-upload-map');
 const btnDeleteMap = document.querySelector<HTMLButtonElement>('#btn-delete-map');
+const btnAddStatus = document.querySelector<HTMLButtonElement>('#btn-add-status');
 const loadingIndicator = document.querySelector<HTMLElement>('#ld')!;
 const toastElement = document.querySelector<HTMLElement>('#t')!;
 
@@ -135,6 +175,7 @@ let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
 let currentProjectId: string | null = null;
 let currentProject: Project | null = null;
 let marksSubscriptionCleanup: (() => void) | null = null;
+let lotsSubscriptionCleanup: (() => void) | null = null;
 let projectStatusSubscriptionCleanup: (() => void) | null = null;
 let usersManager: ReturnType<typeof initUsersManagement> | null = null;
 
@@ -146,11 +187,227 @@ let pinRadius = 0;
 let barrierMap: Uint8Array | null = null;
 
 let marks: Mark[] = [];
-let history: Mark[][] = [];
+let lotRows: LotRegisterRow[] = [];
+let history: UndoAction[] = [];
+let legendDragStartPosition: [number, number] | null = null;
 let legendPos: [number, number] = [0, 0];
 let currentStatus = 'c';
 let currentMode: PaintMode = 'fill';
 let currentZoom = 1;
+let highlightedMarkId: string | null = null;
+let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+function upsertLotRow(row: LotRegisterRow): void {
+  const index = lotRows.findIndex((lot) => lot.id === row.id);
+  if (index >= 0) lotRows[index] = row;
+  else lotRows.push(row);
+  lotTable.setRows(lotRows);
+}
+
+function getClearRecoveryScope(): string {
+  return currentProjectId ?? MAPS[currentMapIndex].id;
+}
+
+function updateClearRecoveryButton(): void {
+  try {
+    const snapshot = loadClearRecoverySnapshot(localStorage, getClearRecoveryScope());
+    restoreClearButton.hidden = !snapshot;
+    if (snapshot) {
+      const clearedAt = new Date(snapshot.clearedAt).toLocaleString();
+      restoreClearButton.textContent =
+        `Restore last clear (${snapshot.marks.length} marks, ${clearedAt})`;
+    }
+  } catch (error) {
+    restoreClearButton.hidden = true;
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(toastElement, `Could not read the clear recovery snapshot: ${message}`);
+  }
+}
+
+function applyLotStatusToMap(row: LotRegisterRow): void {
+  const mark = marks.find((candidate) => candidate.id === row.mark_id);
+  if (!mark || mark.t !== 'f' || mark.s === row.status) return;
+
+  const previousStatus = mark.s;
+  mark.s = row.status;
+  mark.updated_at = row.updated_at;
+  mark.updated_by = row.updated_by;
+  recordUndo({
+    kind: 'status',
+    markId: mark.id!,
+    previousStatus,
+    newStatus: row.status,
+  });
+  renderAll();
+  saveState();
+  showActionToast(toastElement, 'Lot status updated.', 'Undo', async () => undo(), 5000);
+}
+
+function showExistingLot(rowId: string): void {
+  const row = lotRows.find((candidate) => candidate.id === rowId);
+  if (!row?.mark_id) {
+    showToast(toastElement, 'The existing lot is not linked to a map fill.');
+    return;
+  }
+  highlightMapMark(row.mark_id);
+}
+
+function exportLotRows(rows: LotRegisterRow[], kind: 'csv' | 'xlsx', filtered: boolean): Promise<void> {
+  const projectName = currentProject?.name ?? currentProjectId ?? MAPS[currentMapIndex].id ?? 'project';
+  const safeProjectName = projectName.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'project';
+  const filenameStem = `${safeProjectName}-lots-${new Date().toISOString().slice(0, 10)}`;
+  const statusNames = Object.fromEntries(
+    Object.entries(statuses).map(([key, config]) => [key, config.n])
+  );
+
+  if (kind === 'csv') {
+    const blob = new Blob([buildLotCsv(rows, projectName, statusNames)], {
+      type: 'text/csv;charset=utf-8',
+    });
+    downloadBlob(`${filenameStem}.csv`, blob);
+    showToast(toastElement, `Exported ${filtered ? 'filtered' : 'all'} lot rows as CSV.`);
+    return Promise.resolve();
+  }
+
+  return exportLotsToXlsx(rows, projectName, filenameStem, statusNames).then(() => {
+    showToast(toastElement, `Exported ${filtered ? 'filtered' : 'all'} lot rows as XLSX.`);
+  });
+}
+
+const lotPanel = initLotPanel(stage, {
+  onSave: async (input) => {
+    const normalize = (value: string): string => value.trim().toLocaleUpperCase();
+    lotRows = await listLots(input.projectId);
+    const unmappedMatch = lotRows.find(
+      (row) =>
+        row.mark_id === null &&
+        row.project_id === input.projectId &&
+        row.phase === normalize(input.phase) &&
+        row.block === normalize(input.block) &&
+        row.lot === normalize(input.lot)
+    );
+    const row = await saveLot(input);
+    upsertLotRow(row);
+    if (statuses[row.status]) setStatus(row.status);
+    applyLotStatusToMap(row);
+    return {
+      row,
+      linkedExisting: Boolean(unmappedMatch && unmappedMatch.id === row.id),
+    };
+  },
+  onCancel: async (context) => {
+    if (!context.discardOnCancel || context.row) return;
+    if (currentProjectId !== context.projectId) {
+      throw new Error('The active project changed before the painted lot could be removed.');
+    }
+    const { error } = await deleteMark(context.markId);
+    if (error) throw error;
+
+    marks = marks.filter((mark) => mark.id !== context.markId);
+    history = history
+      .map((action) => withoutMark(action, context.markId))
+      .filter((action): action is UndoAction => action !== null);
+    refreshStatusUi();
+    saveState();
+    showToast(toastElement, 'Paint canceled; the unregistered fill was removed.');
+  },
+  onShowExisting: showExistingLot,
+  getExistingLotLabel: (rowId) => {
+    const row = lotRows.find((candidate) => candidate.id === rowId);
+    return row ? `${row.phase}/${row.block}/${row.lot}` : null;
+  },
+});
+const lotTable = initLotTable(stage, lotTableButton, {
+  onSelectRow: (row) => {
+    if (row.mark_id) highlightMapMark(row.mark_id);
+    else showToast(toastElement, 'This register lot is not linked to a map fill.');
+  },
+  onUpdateStatus: async (row, status) => {
+    const updated = await updateLotStatus(row.id, status);
+    upsertLotRow(updated);
+    applyLotStatusToMap(updated);
+    return updated;
+  },
+  onUpdateDetails: async (row, details) => {
+    if (!currentProjectId) throw new Error('Select a project before editing a lot.');
+    const updated = await updateLotDetails(currentProjectId, row.id, details);
+    upsertLotRow(updated);
+    return updated;
+  },
+  onDeleteRow: async (row) => {
+    const markId = row.mark_id;
+    if (markId) {
+      const { error } = await deleteMark(markId);
+      if (error) throw error;
+
+      marks = marks.filter((mark) => mark.id !== markId);
+      history = history
+        .map((action) => withoutMark(action, markId))
+        .filter((action): action is UndoAction => action !== null);
+      refreshStatusUi();
+      saveState();
+    }
+
+    try {
+      await deleteLot(row.id);
+    } catch (error) {
+      if (markId && currentProjectId) {
+        try {
+          lotRows = await listLots(currentProjectId);
+          lotTable.setRows(lotRows);
+        } catch (refreshError) {
+          const deleteMessage = error instanceof Error ? error.message : String(error);
+          const refreshMessage =
+            refreshError instanceof Error ? refreshError.message : String(refreshError);
+          throw new Error(
+            `The linked map mark was removed, but the register entry could not be deleted: ${deleteMessage}. Refreshing the register also failed: ${refreshMessage}`
+          );
+        }
+        throw new Error(
+          `The linked map mark was removed, but the register entry could not be deleted: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      throw error;
+    }
+
+    lotRows = lotRows.filter((candidate) => candidate.id !== row.id);
+    lotTable.setRows(lotRows);
+    showToast(toastElement, `Register entry ${row.phase}/${row.block}/${row.lot} deleted.`);
+  },
+  onLoadDisplayNames: getDisplayNames,
+  onLoadHistory: async (row) => {
+    if (currentProjectId !== row.project_id) {
+      throw new Error('The active project changed before lot history could be loaded.');
+    }
+    const historyRows = await listLotHistory(row.project_id, row.id);
+    const names = await getDisplayNames(
+      historyRows.map((entry) => entry.changed_by ?? '')
+    );
+    return historyRows.map((entry) => ({
+      ...entry,
+      actorName: names.get(entry.changed_by ?? '')?.trim() || 'Former user',
+    }));
+  },
+  onRestoreHistory: async (entry) => {
+    if (currentProjectId !== entry.project_id) {
+      throw new Error('The active project changed before this version could be restored.');
+    }
+    const updated = await restoreLotHistory(entry.id);
+    upsertLotRow(updated);
+    applyLotStatusToMap(updated);
+    return updated;
+  },
+  onExportCsv: (rows, filtered) => {
+    void exportLotRows(rows, 'csv', filtered);
+  },
+  onExportXlsx: (rows, filtered) => {
+    void exportLotRows(rows, 'xlsx', filtered);
+  },
+  onError: (message) => showToast(toastElement, `Lot register action failed: ${message}`),
+});
+lotTable.setStatuses(statuses);
+lotTableButton.addEventListener('click', () => void lotPanel.dismiss());
+lotTableButton.addEventListener('click', switchToMap);
 
 // 2D Pan and Drag State (supports dragging in all directions)
 let panX = 0;
@@ -171,7 +428,7 @@ function switchToMap(): void {
   if (navMapBtn) navMapBtn.classList.add('on');
   if (navUsersBtn) navUsersBtn.classList.remove('on');
   if (stage) stage.style.display = 'block';
-  if (headerControls) headerControls.style.display = 'flex';
+  if (headerControls) headerControls.style.display = 'grid';
   if (statusHint) statusHint.style.display = 'block';
   if (usersView) usersView.style.display = 'none';
 }
@@ -183,6 +440,8 @@ async function switchToUsers(): Promise<void> {
   }
   if (navUsersBtn) navUsersBtn.classList.add('on');
   if (navMapBtn) navMapBtn.classList.remove('on');
+  lotPanel.hide();
+  lotTable.close();
   if (stage) stage.style.display = 'none';
   if (headerControls) headerControls.style.display = 'none';
   if (statusHint) statusHint.style.display = 'none';
@@ -209,7 +468,15 @@ function getStorageKey(): string {
 
 function saveState(): void {
   try {
-    const serializedMarks = marks.map(({ id, t, x, y, s }) => ({ id, t, x, y, s }));
+    const serializedMarks = marks.map(({ id, t, x, y, s, updated_at, updated_by }) => ({
+      id,
+      t,
+      x,
+      y,
+      s,
+      updated_at,
+      updated_by,
+    }));
     const savedStatuses = Object.fromEntries(
       Object.entries(statuses).map(([k, v]) => [k, { n: v.n, c: v.c }])
     );
@@ -223,6 +490,55 @@ function saveState(): void {
   }
 }
 
+function markFromRow(row: MarkRow): Mark | null {
+  const x = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+  const y = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+  const mark: Mark = {
+    id: row.id,
+    t: row.kind === 'pin' ? 'p' : 'f',
+    x,
+    y,
+    s: row.status,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+  };
+  if (mark.t === 'f') {
+    if (!barrierMap) return null;
+    const spans = region(x, y, mapWidth, mapHeight, barrierMap);
+    if (spans) mark.sp = spans;
+  }
+  return mark.t === 'p' || mark.sp ? mark : null;
+}
+
+function markForClearRecovery(row: MarkRow): Mark {
+  const x = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
+  const y = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
+  const mark: Mark = {
+    id: row.id,
+    t: row.kind === 'pin' ? 'p' : 'f',
+    x,
+    y,
+    s: row.status,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+  };
+  if (mark.t === 'f' && barrierMap) {
+    const spans = region(x, y, mapWidth, mapHeight, barrierMap);
+    if (spans) mark.sp = spans;
+  }
+  return mark;
+}
+
+async function reloadMarksFromSupabase(projectId: string): Promise<void> {
+  const { data, error } = await loadMarks(projectId);
+  if (error || !data) {
+    throw error || new Error('Supabase returned no mark data');
+  }
+  marks = data.map(markFromRow).filter((mark): mark is Mark => mark !== null);
+  saveState();
+  renderAll();
+}
+
 function applyStatusConfig(config: ProjectStatusConfig | null): void {
   if (!config || typeof config !== 'object') return;
 
@@ -231,6 +547,7 @@ function applyStatusConfig(config: ProjectStatusConfig | null): void {
     delete (statuses as Record<string, { n: string; c: string } >)[key];
   }
   Object.assign(statuses, merged);
+  lotTable.setStatuses(statuses);
 
   const currentKeyExists = currentStatus && Object.prototype.hasOwnProperty.call(merged, currentStatus);
   if (!currentKeyExists) {
@@ -238,6 +555,7 @@ function applyStatusConfig(config: ProjectStatusConfig | null): void {
   }
 
   renderChips(chipsContainer, statuses, currentStatus, {
+    selectable: false,
     onSelect: (key) => setStatus(key),
     onColorChange: (key, newColor) => {
       if (statuses[key]) {
@@ -261,11 +579,37 @@ function applyStatusConfig(config: ProjectStatusConfig | null): void {
   });
 }
 
-function snapshot(): void {
-  history.push([...marks]);
+function recordUndo(action: UndoAction): void {
+  history.push(action);
   if (history.length > 100) {
     history.shift();
   }
+}
+
+function withoutMark(action: UndoAction, markId: string): UndoAction | null {
+  if (action.kind === 'add') return action.mark.id === markId ? null : action;
+  if (action.kind === 'erase') {
+    const marks = action.marks.filter((mark) => mark.id !== markId);
+    return marks.length ? { ...action, marks } : null;
+  }
+  if (action.kind === 'clear') {
+    const marks = action.snapshot.marks.filter((mark) => mark.id !== markId);
+    if (!marks.length) return null;
+    return {
+      ...action,
+      snapshot: {
+        ...action.snapshot,
+        marks,
+        lots: action.snapshot.lots.filter((row) => row.mark_id !== markId),
+      },
+    };
+  }
+  if (action.kind === 'status') return action.markId === markId ? null : action;
+  if (action.kind !== 'batch') return action;
+  const actions = action.actions
+    .map((child) => withoutMark(child, markId))
+    .filter((child): child is UndoAction => child !== null);
+  return actions.length ? { ...action, actions } : null;
 }
 
 function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
@@ -273,6 +617,10 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   const isAdmin = role === 'admin';
   const isEditor = role === 'editor';
   const canEdit = isAdmin || isEditor;
+  if (!canEdit) lotPanel.hide();
+  lotTable.setCanEdit(canEdit);
+  lotTableButton.style.display = currentUser && currentProjectId ? 'flex' : 'none';
+  if (btnAddStatus) btnAddStatus.style.display = canEdit ? 'inline-flex' : 'none';
 
   if (canEdit) {
     document.body.classList.remove('role-viewer');
@@ -302,7 +650,7 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
     if (role === 'admin') {
       statusHint.textContent = '';
     } else if (role === 'editor') {
-      statusHint.textContent = 'Editor Mode: Click a lot to paint · drag to pan · keys 1 2 3 = status';
+      statusHint.textContent = 'Editor Mode: Paint a lot, then set its P/B/L and status in Lot details · drag to pan';
     } else if (role === 'disabled') {
       statusHint.textContent = 'Your account has been disabled. Please contact an administrator.';
     } else {
@@ -322,7 +670,6 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   if (btnDeleteMap) {
     btnDeleteMap.style.display = isAdmin ? 'inline-flex' : 'none';
   }
-
   // If user was viewing users panel and got demoted, redirect back to map
   if (!isAdmin && usersView && usersView.style.display !== 'none') {
     switchToMap();
@@ -342,16 +689,24 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   }
 }
 
-function setupRealtimeForCurrentProject(projectId: string): void {
+function clearProjectSubscriptions(): void {
   if (marksSubscriptionCleanup) {
     marksSubscriptionCleanup();
     marksSubscriptionCleanup = null;
+  }
+  if (lotsSubscriptionCleanup) {
+    lotsSubscriptionCleanup();
+    lotsSubscriptionCleanup = null;
   }
 
   if (projectStatusSubscriptionCleanup) {
     projectStatusSubscriptionCleanup();
     projectStatusSubscriptionCleanup = null;
   }
+}
+
+function setupRealtimeForCurrentProject(projectId: string): void {
+  clearProjectSubscriptions();
 
   projectStatusSubscriptionCleanup = subscribeToProjectStatusConfig(projectId, (config) => {
     if (!config) return;
@@ -366,23 +721,8 @@ function setupRealtimeForCurrentProject(projectId: string): void {
     if (change.eventType === 'INSERT') {
       const row = change.newRecord;
       if (!row || marks.some((m) => m.id === row.id)) return;
-
-      const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-      const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-      const m: Mark = {
-        id: row.id,
-        t: row.kind === 'pin' ? 'p' : 'f',
-        x: px,
-        y: py,
-        s: row.status,
-      };
-
-      if (m.t === 'f') {
-        const spans = region(px, py, mapWidth, mapHeight, barrierMap);
-        if (spans) m.sp = spans;
-      }
-
-      if (m.t === 'p' || m.sp) {
+      const m = markFromRow(row);
+      if (m) {
         marks.push(m);
         renderAll();
         saveState();
@@ -402,21 +742,8 @@ function setupRealtimeForCurrentProject(projectId: string): void {
       if (!row) return;
 
       const existingIndex = marks.findIndex((m) => m.id === row.id);
-      const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-      const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-
-      const updatedMark: Mark = {
-        id: row.id,
-        t: row.kind === 'pin' ? 'p' : 'f',
-        x: px,
-        y: py,
-        s: row.status,
-      };
-
-      if (updatedMark.t === 'f') {
-        const spans = region(px, py, mapWidth, mapHeight, barrierMap);
-        if (spans) updatedMark.sp = spans;
-      }
+      const updatedMark = markFromRow(row);
+      if (!updatedMark) return;
 
       if (existingIndex >= 0) {
         marks[existingIndex] = updatedMark;
@@ -426,6 +753,15 @@ function setupRealtimeForCurrentProject(projectId: string): void {
       renderAll();
       saveState();
     }
+  });
+
+  lotsSubscriptionCleanup = subscribeLots(projectId, {
+    onInsert: upsertLotRow,
+    onUpdate: upsertLotRow,
+    onDelete: ({ id }) => {
+      lotRows = lotRows.filter((row) => row.id !== id);
+      lotTable.setRows(lotRows);
+    },
   });
 }
 
@@ -443,8 +779,86 @@ function renderAll(): void {
     mapHeight,
     pinRadius
   );
+  if (highlightedMarkId) {
+    const highlighted = marks.find((mark) => mark.id === highlightedMarkId);
+    if (highlighted) {
+      pinsCtx.save();
+      pinsCtx.strokeStyle = '#facc15';
+      pinsCtx.lineWidth = Math.max(3, mapWidth * 0.003);
+      pinsCtx.shadowColor = '#111';
+      pinsCtx.shadowBlur = Math.max(3, mapWidth * 0.002);
+      if (highlighted.t === 'f' && highlighted.sp?.length) {
+        let left = mapWidth;
+        let right = 0;
+        let top = mapHeight;
+        let bottom = 0;
+        for (const [y, start, end] of highlighted.sp) {
+          left = Math.min(left, start);
+          right = Math.max(right, end);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+        pinsCtx.strokeRect(left, top, right - left + 1, bottom - top + 1);
+      } else {
+        pinsCtx.beginPath();
+        pinsCtx.arc(highlighted.x, highlighted.y, pinRadius * 1.8, 0, Math.PI * 2);
+        pinsCtx.stroke();
+      }
+      pinsCtx.restore();
+    }
+  }
   updateChipCounts(chipsContainer, counts);
   selectChip(chipsContainer, currentStatus, statuses);
+}
+
+function highlightMapMark(markId: string): void {
+  const mark = marks.find((candidate) => candidate.id === markId);
+  if (!mark) {
+    showToast(toastElement, 'The existing lot mark is not loaded on this map.');
+    return;
+  }
+
+  highlightedMarkId = markId;
+  currentZoom = Math.max(
+    currentZoom,
+    Math.min(0.75, stage.clientWidth / (mapWidth * 0.4))
+  );
+  applyZoom(box, mapWidth, currentZoom, mapHeight);
+  panX = stage.clientWidth / 2 - mark.x * currentZoom;
+  panY = stage.clientHeight / 2 - mark.y * currentZoom;
+  applyTransform(box, panX, panY);
+  renderAll();
+
+  if (highlightTimer) clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => {
+    highlightedMarkId = null;
+    highlightTimer = undefined;
+    renderAll();
+  }, 3000);
+}
+
+function openLotPanelFor(mark: Mark, discardOnCancel = false): void {
+  if (
+    mark.t !== 'f' ||
+    !mark.id ||
+    !currentUser ||
+    !currentProjectId ||
+    (currentUserRole !== 'admin' && currentUserRole !== 'editor')
+  ) {
+    return;
+  }
+  lotTable.close();
+  const row = lotRows.find((candidate) => candidate.mark_id === mark.id) ?? null;
+  lotPanel.open(
+    {
+      projectId: currentProjectId,
+      markId: mark.id,
+      status: mark.s,
+      row,
+      discardOnCancel,
+    },
+    statuses
+  );
 }
 
 function refreshStatusUi(): void {
@@ -486,9 +900,7 @@ function setZoom(factor: number): void {
     currentZoom,
     panX,
     panY,
-    stage,
-    mapWidth,
-    mapHeight
+    stage
   );
   currentZoom = res.zoom;
   panX = res.panX;
@@ -498,23 +910,168 @@ function setZoom(factor: number): void {
 }
 
 async function undo(): Promise<void> {
-  if (history.length > 0) {
-    const previousMarks = marks;
-    marks = history.pop()!;
-    refreshStatusUi();
-    saveState();
+  const action = history.at(-1);
+  if (!action) return;
+  lotPanel.close();
+  if (!currentUser || !currentProjectId) {
+    showToast(toastElement, 'Undo requires a connected project. No local-only undo was applied.');
+    return;
+  }
 
-    // If a mark was removed by undo, delete it from Supabase as well
-    if (currentUser && previousMarks.length > marks.length) {
-      const removedMark = previousMarks[previousMarks.length - 1];
-      if (removedMark?.id) {
-        const { error } = await deleteMark(removedMark.id);
+  const actions = action.kind === 'batch' ? [...action.actions].reverse() : [action];
+  const touchedMarks = new Set<string>();
+  const legendUndo: Extract<UndoAction, { kind: 'legend' }>[] = [];
+  let failure: Error | null = null;
+
+  for (const inverse of actions) {
+    if (inverse.kind === 'add') {
+      if (!inverse.mark.id) {
+        failure = new Error('The added mark has no saved ID and cannot be undone safely.');
+        break;
+      }
+      const { error } = await deleteMark(inverse.mark.id);
+      if (error) {
+        failure = error;
+        break;
+      }
+      touchedMarks.add(inverse.mark.id);
+    } else if (inverse.kind === 'erase') {
+      for (const erased of inverse.marks) {
+        if (!erased.id) {
+          failure = new Error('An erased mark has no saved ID and cannot be restored safely.');
+          break;
+        }
+        const { error } = await saveMark({
+          id: erased.id,
+          project_id: currentProjectId,
+          x: erased.x / mapWidth,
+          y: erased.y / mapHeight,
+          status: erased.s,
+          kind: erased.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
         if (error) {
-          console.warn('Supabase deleteMark on undo error:', error.message);
+          failure = error;
+          break;
+        }
+        touchedMarks.add(erased.id);
+      }
+      if (failure) break;
+    } else if (inverse.kind === 'clear') {
+      for (const erased of inverse.snapshot.marks) {
+        if (!erased.id) {
+          failure = new Error('A cleared mark has no saved ID and cannot be restored safely.');
+          break;
+        }
+        const { error } = await saveMark({
+          id: erased.id,
+          project_id: currentProjectId,
+          x: erased.x / mapWidth,
+          y: erased.y / mapHeight,
+          status: erased.s,
+          kind: erased.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
+        if (error) {
+          failure = error;
+          break;
+        }
+        touchedMarks.add(erased.id);
+
+        const linkedLot = inverse.snapshot.lots.find((row) => row.mark_id === erased.id);
+        if (linkedLot) {
+          try {
+            upsertLotRow(await saveLot({
+              projectId: currentProjectId,
+              markId: erased.id,
+              phase: linkedLot.phase,
+              block: linkedLot.block,
+              lot: linkedLot.lot,
+              status: linkedLot.status,
+            }));
+          } catch (error) {
+            failure = error instanceof Error ? error : new Error(String(error));
+            break;
+          }
         }
       }
+      if (failure) break;
+    } else if (inverse.kind === 'status') {
+      const mark = marks.find((candidate) => candidate.id === inverse.markId);
+      if (!mark || mark.s !== inverse.newStatus) {
+        failure = new Error('This mark changed since your edit. Refresh before undoing.');
+        break;
+      }
+      const linkedLot = mark.t === 'f'
+        ? lotRows.find((row) => row.mark_id === inverse.markId)
+        : undefined;
+      if (linkedLot) {
+        try {
+          upsertLotRow(await undoLotStatus(linkedLot.id, inverse.previousStatus));
+        } catch (error) {
+          failure = error instanceof Error ? error : new Error(String(error));
+          break;
+        }
+      } else {
+        const { data, error } = await undoStatusChange(inverse.markId, inverse.previousStatus);
+        if (error || !data) {
+          failure = error || new Error('Status undo returned no updated mark.');
+          break;
+        }
+      }
+      touchedMarks.add(inverse.markId);
+    } else if (inverse.kind === 'legend') {
+      const { error } = await saveProjectLegendPosition(currentProjectId, inverse.previous);
+      if (error) {
+        failure = error;
+        break;
+      }
+      legendUndo.push(inverse);
     }
   }
+
+  if (failure) {
+    history = [];
+    try {
+      await reloadMarksFromSupabase(currentProjectId);
+    } catch (syncError) {
+      const syncMessage = syncError instanceof Error ? syncError.message : String(syncError);
+      failure = new Error(`${failure.message}; refreshing from Supabase also failed: ${syncMessage}`);
+    }
+    if (legendUndo.length) {
+      legendPos = legendUndo[legendUndo.length - 1].previous;
+      saveState();
+      renderAll();
+    }
+    const partial = actions.length > 1 ? ' Some parts may have been undone.' : '';
+    showToast(toastElement, `${failure.message}.${partial} Undo history was cleared to avoid replaying a partial action.`);
+    return;
+  }
+
+  history.pop();
+  for (const legend of legendUndo) {
+    legendPos = legend.previous;
+  }
+  if (touchedMarks.size) {
+    try {
+      await reloadMarksFromSupabase(currentProjectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(toastElement, `Undo saved, but refreshing marks failed: ${message}`);
+      return;
+    }
+  }
+  if (action.kind === 'clear') {
+    try {
+      removeClearRecoverySnapshot(localStorage, action.snapshot.scope);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(toastElement, `Map restored, but the recovery snapshot could not be removed: ${message}`);
+    }
+  }
+  saveState();
+  updateClearRecoveryButton();
+  refreshStatusUi();
 }
 
 function setStatus(key: string): void {
@@ -538,11 +1095,19 @@ function closeLegendEditor(): void {
     legendBackdrop.classList.add('hidden');
     legendBackdrop.setAttribute('aria-hidden', 'true');
   }
+  legendEscapeDismissal?.deactivate();
   legendEditorMode = 'add';
   legendEditorKey = null;
   if (legendNameInput) legendNameInput.value = '';
   if (legendColorInput) legendColorInput.value = '#1f9d55';
 }
+
+const legendEscapeDismissal = legendBackdrop
+  ? registerEscapeDismissable(legendBackdrop, () => {
+      closeLegendEditor();
+      return true;
+    })
+  : null;
 
 function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void {
   if (mode === 'add' && Object.keys(statuses).length >= MAX_NUMBERED_STATUSES) {
@@ -556,6 +1121,7 @@ function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void
   if (legendBackdrop) {
     legendBackdrop.classList.remove('hidden');
     legendBackdrop.setAttribute('aria-hidden', 'false');
+    legendEscapeDismissal?.activate();
   }
 
   if (mode === 'edit' && key && statuses[key]) {
@@ -573,6 +1139,7 @@ function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void
 }
 
 async function persistStatuses(): Promise<void> {
+  lotTable.setStatuses(statuses);
   const savedStatuses = Object.fromEntries(
     Object.entries(statuses).map(([k, v]) => [k, { n: v.n, c: v.c }])
   );
@@ -587,6 +1154,7 @@ async function persistStatuses(): Promise<void> {
   }
 
   renderChips(chipsContainer, statuses, currentStatus, {
+    selectable: false,
     onSelect: (key) => setStatus(key),
     onColorChange: (key, newColor) => {
       if (statuses[key]) {
@@ -610,6 +1178,7 @@ async function persistStatuses(): Promise<void> {
         currentStatus = nextKey;
       }
       renderChips(chipsContainer, statuses, currentStatus, {
+        selectable: false,
         onSelect: (chipKey) => setStatus(chipKey),
         onColorChange: (chipKey, newColor) => {
           if (statuses[chipKey]) {
@@ -640,9 +1209,14 @@ async function persistStatuses(): Promise<void> {
   });
 }
 
-function setMode(mode: PaintMode): void {
+async function setMode(mode: PaintMode): Promise<boolean> {
+  if (mode === 'pin' && lotPanel.isOpen()) {
+    const dismissed = await lotPanel.dismiss();
+    if (!dismissed) return false;
+  }
   currentMode = mode;
   setToolbarMode(modeButtons, currentMode, box);
+  return true;
 }
 
 /**
@@ -670,6 +1244,12 @@ async function resolveProjectId(mapIndex: number): Promise<string | null> {
 // Map Loading
 async function openMap(index: number): Promise<void> {
   currentMapIndex = index;
+  clearProjectSubscriptions();
+  lotPanel.close();
+  lotTable.close();
+  lotRows = [];
+  lotTable.setRows(lotRows);
+  lotTableButton.style.display = 'none';
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -697,8 +1277,16 @@ async function openMap(index: number): Promise<void> {
 
     // 1. Try to resolve project ID from Supabase
     currentProjectId = await resolveProjectId(index);
-
-    let loadedFromSupabase = false;
+    lotTableButton.style.display =
+      currentUser && currentProjectId ? 'flex' : 'none';
+    if (currentProjectId) {
+      const { position, error } = await loadProjectLegendPosition(currentProjectId);
+      if (position) legendPos = position;
+      else if (error) showToast(toastElement, `Could not load legend position: ${error.message}`);
+    }
+    if (!currentProjectId && currentUser) {
+      showToast(toastElement, 'This project is not available from Supabase; cached marks were not loaded.');
+    }
 
     // 2. If project ID resolved, attempt to load marks from Supabase
     if (currentProjectId) {
@@ -708,37 +1296,26 @@ async function openMap(index: number): Promise<void> {
       }
 
       const { data: supaMarks, error } = await loadMarks(currentProjectId);
-      if (!error && supaMarks && supaMarks.length > 0) {
-        loadedFromSupabase = true;
-        marks = supaMarks
-          .map((row) => {
-            const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-            const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-            const m: Mark = {
-              id: row.id,
-              t: row.kind === 'pin' ? 'p' : 'f',
-              x: px,
-              y: py,
-              s: row.status,
-            };
-            if (m.t === 'f') {
-              const spans = region(px, py, mapWidth, mapHeight, barrierMap!);
-              if (spans) m.sp = spans;
-            }
-            return m;
-          })
-          .filter((m) => m.t === 'p' || m.sp);
-
-        // Keep local storage synchronized with latest Supabase state
+      if (!error && supaMarks) {
+        marks = supaMarks.map(markFromRow).filter((mark): mark is Mark => mark !== null);
         saveState();
+      } else if (error) {
+        showToast(toastElement, `Could not load saved marks: ${error.message}`);
+      }
+      try {
+        lotRows = await listLots(currentProjectId);
+        lotTable.setRows(lotRows);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        showToast(toastElement, `Could not load lot register: ${message}`);
       }
 
       // Connect realtime updates
       setupRealtimeForCurrentProject(currentProjectId);
     }
 
-    // 3. Fallback to localStorage if not loaded from Supabase (or user is offline/unauthenticated)
-    if (!loadedFromSupabase) {
+    // Local cached marks are used only when there is no authenticated server project.
+    if (!currentProjectId && !currentUser) {
       try {
         const raw = localStorage.getItem(getStorageKey());
         if (raw) {
@@ -767,6 +1344,7 @@ async function openMap(index: number): Promise<void> {
     loadingIndicator.style.display = 'none';
     fitAndCenterMap();
     renderAll();
+    updateClearRecoveryButton();
   } catch (err) {
     console.error('Failed to load map image:', err);
     loadingIndicator.textContent = 'Failed to load map.';
@@ -777,8 +1355,14 @@ async function openMap(index: number): Promise<void> {
  * Loads a project directly from its Supabase record.
  */
 async function openProject(proj: Project): Promise<void> {
+  clearProjectSubscriptions();
   currentProjectId = proj.id;
   currentProject = proj;
+  lotPanel.close();
+  lotTable.close();
+  lotRows = [];
+  lotTable.setRows(lotRows);
+  lotTableButton.style.display = currentUser ? 'flex' : 'none';
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -805,60 +1389,26 @@ async function openProject(proj: Project): Promise<void> {
 
     // Fetch marks from Supabase
     const { data: supaMarks, error } = await loadMarks(proj.id);
-    if (!error && supaMarks && supaMarks.length > 0) {
-      marks = supaMarks
-        .map((row) => {
-          const px = row.x <= 1 ? Math.round(row.x * mapWidth) : Math.round(row.x);
-          const py = row.y <= 1 ? Math.round(row.y * mapHeight) : Math.round(row.y);
-          const m: Mark = {
-            id: row.id,
-            t: row.kind === 'pin' ? 'p' : 'f',
-            x: px,
-            y: py,
-            s: row.status,
-          };
-          if (m.t === 'f') {
-            const spans = region(px, py, mapWidth, mapHeight, barrierMap!);
-            if (spans) m.sp = spans;
-          }
-          return m;
-        })
-        .filter((m) => m.t === 'p' || m.sp);
-
+    if (!error && supaMarks) {
+      marks = supaMarks.map(markFromRow).filter((mark): mark is Mark => mark !== null);
       saveState();
+    } else if (error) {
+      showToast(toastElement, `Could not load saved marks: ${error.message}`);
+    }
+    try {
+      lotRows = await listLots(proj.id);
+      lotTable.setRows(lotRows);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(toastElement, `Could not load lot register: ${message}`);
     }
 
-    if (currentProjectId) {
-      setupRealtimeForCurrentProject(currentProjectId);
-    } else {
-      // Fallback to local storage if empty or offline
-      try {
-        const raw = localStorage.getItem(getStorageKey());
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          marks = Array.isArray(parsed) ? parsed : parsed.marks || [];
-          if (parsed && parsed.lg) {
-            legendPos = parsed.lg;
-          }
-        }
-      } catch {
-        // Ignore storage parse errors
-      }
-
-      marks = marks.filter((m) => {
-        if (m.t === 'p') return true;
-        const spans = region(m.x, m.y, mapWidth, mapHeight, barrierMap!);
-        if (spans) {
-          m.sp = spans;
-          return true;
-        }
-        return false;
-      });
-    }
+    setupRealtimeForCurrentProject(proj.id);
 
     loadingIndicator.style.display = 'none';
     fitAndCenterMap();
     renderAll();
+    updateClearRecoveryButton();
   } catch (err) {
     console.error('Failed to load project map:', err);
     const message = err instanceof Error ? err.message : 'Failed to load map.';
@@ -879,11 +1429,28 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
     showToast(toastElement, 'Viewer View: Editing is restricted to administrators.');
     return;
   }
+  if (currentUser && !currentProjectId) {
+    showToast(toastElement, 'This project is not connected to Supabase, so edits are disabled.');
+    return;
+  }
 
   const { x, y } = screenToMapCoords(clientX, clientY, box, mapWidth, mapHeight);
 
   if (currentMode === 'lg') {
-    legendPos = [Math.min(x / mapWidth, 0.73), Math.min(y / mapHeight, 0.935)];
+    const previousPosition: [number, number] = [...legendPos];
+    const nextPosition: [number, number] = [
+      Math.min(x / mapWidth, 0.73),
+      Math.min(y / mapHeight, 0.935),
+    ];
+    if (currentUser && currentProjectId) {
+      const { error } = await saveProjectLegendPosition(currentProjectId, nextPosition);
+      if (error) {
+        showToast(toastElement, `Could not move legend: ${error.message}`);
+        return;
+      }
+    }
+    legendPos = nextPosition;
+    recordUndo({ kind: 'legend', previous: previousPosition, next: nextPosition });
     renderAll();
     saveState();
     return;
@@ -906,43 +1473,196 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
     return;
   }
 
-  if (result.actionTaken) {
-    snapshot();
-    marks = result.updatedMarks;
-    refreshStatusUi();
+  if (currentMode === 'fill' && result.addedMark && lotPanel.isOpen()) {
+    const dismissed = await lotPanel.dismiss();
+    if (!dismissed) return;
+  }
 
-    if (currentUser && result.erasedMark?.id) {
-      const { error } = await deleteMark(result.erasedMark.id);
-      if (error) {
-        console.warn('Supabase deleteMark error:', error.message);
+  if (result.actionTaken) {
+    const shouldPersist = Boolean(currentUser && currentProjectId);
+    let remoteChanged = false;
+    const syncAfterFailure = async (error: Error): Promise<void> => {
+      let message = error.message;
+      if (remoteChanged && currentProjectId) {
+        history = [];
+        try {
+          await reloadMarksFromSupabase(currentProjectId);
+        } catch (syncError) {
+          const syncMessage =
+            syncError instanceof Error ? syncError.message : String(syncError);
+          message += `; refreshing from Supabase also failed: ${syncMessage}`;
+        }
+        try {
+          lotRows = await listLots(currentProjectId);
+          lotTable.setRows(lotRows);
+        } catch (syncError) {
+          const syncMessage =
+            syncError instanceof Error ? syncError.message : String(syncError);
+          message += `; refreshing the lot register also failed: ${syncMessage}`;
+        }
+      }
+      showToast(toastElement, `Map change was not fully saved: ${message}`);
+    };
+
+    const previousMark = result.updatedMark
+      ? marks.find((mark) => mark.id === result.updatedMark?.id)
+      : undefined;
+    if (shouldPersist && result.updatedMark && previousMark?.s !== result.updatedMark.s) {
+      if (!result.updatedMark.id || !currentUser || !currentProjectId) {
+        showToast(toastElement, 'Cannot update a map mark without its saved mark ID.');
+        return;
+      }
+      const linkedLot = result.updatedMark.t === 'f'
+        ? lotRows.find((row) => row.mark_id === result.updatedMark?.id)
+        : undefined;
+      if (linkedLot) {
+        try {
+          const updatedLot = await saveLot({
+            projectId: currentProjectId,
+            markId: result.updatedMark.id,
+            phase: linkedLot.phase,
+            block: linkedLot.block,
+            lot: linkedLot.lot,
+            status: result.updatedMark.s,
+          });
+          upsertLotRow(updatedLot);
+          result.updatedMark.updated_at = updatedLot.updated_at;
+          result.updatedMark.updated_by = updatedLot.updated_by;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          showToast(toastElement, `Could not atomically update lot status: ${message}`);
+          return;
+        }
       } else {
-        saveState();
+        const { data, error } = await updateMark(result.updatedMark.id, {
+          status: result.updatedMark.s,
+          updated_by: currentUser.id,
+        });
+        if (error || !data) {
+          showToast(toastElement, `Could not update fill: ${error?.message || 'No row returned'}`);
+          return;
+        }
+        result.updatedMark.updated_at = data.updated_at;
+        result.updatedMark.updated_by = data.updated_by;
+      }
+      remoteChanged = true;
+    }
+
+    const marksToDelete = [
+      ...(result.erasedMark ? [result.erasedMark] : []),
+      ...(result.erasedMarks || []),
+    ];
+    const erasedMarkIds = new Set(
+      marksToDelete.map((mark) => mark.id).filter((id): id is string => Boolean(id))
+    );
+    const registerRowsForErasedMarks = new Set(
+      lotRows
+        .filter((row) => row.mark_id && erasedMarkIds.has(row.mark_id))
+        .map((row) => row.id)
+    );
+    if (shouldPersist) {
+      for (const mark of marksToDelete) {
+        if (!mark.id) continue;
+        const { error } = await deleteMark(mark.id);
+        if (error) {
+          await syncAfterFailure(error);
+          return;
+        }
+        remoteChanged = true;
+      }
+      if (marksToDelete.some((mark) => mark.id) && currentProjectId) {
+        try {
+          lotRows = await listLots(currentProjectId);
+          lotTable.setRows(lotRows);
+          const unmappedCount = lotRows.filter(
+            (row) => registerRowsForErasedMarks.has(row.id) && row.mark_id === null
+          ).length;
+          if (unmappedCount > 0) {
+            showToast(
+              toastElement,
+              `${unmappedCount} register row${unmappedCount === 1 ? '' : 's'} kept as unmapped.`
+            );
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await syncAfterFailure(
+            new Error(`Map marks were erased, but the register could not be refreshed: ${message}`)
+          );
+          return;
+        }
       }
     }
 
-    // If a new mark was placed or filled, save it to Supabase
-    if (result.addedMark) {
-      if (currentUser && currentProjectId) {
-        const markToSave = result.addedMark;
-        const normX = markToSave.x / mapWidth;
-        const normY = markToSave.y / mapHeight;
-
-        const { data, error } = await saveMark({
-          project_id: currentProjectId,
-          x: normX,
-          y: normY,
-          status: markToSave.s,
-          kind: markToSave.t === 'p' ? 'pin' : 'fill',
-          updated_by: currentUser.id,
-        });
-
-        if (error) {
-          console.warn('Supabase saveMark error (saved locally):', error.message);
-        } else if (data?.id) {
-          markToSave.id = data.id;
-          saveState(); // update localStorage with Supabase UUID
-        }
+    if (result.addedMark && shouldPersist && currentUser && currentProjectId) {
+      const markToSave = result.addedMark;
+      const { data, error } = await saveMark({
+        project_id: currentProjectId,
+        x: markToSave.x / mapWidth,
+        y: markToSave.y / mapHeight,
+        status: markToSave.s,
+        kind: markToSave.t === 'p' ? 'pin' : 'fill',
+        updated_by: currentUser.id,
+      });
+      if (error || !data) {
+        await syncAfterFailure(error || new Error('No row returned'));
+        return;
       }
+      markToSave.id = data.id;
+      markToSave.updated_at = data.updated_at;
+      markToSave.updated_by = data.updated_by;
+    }
+
+    const undoActions: UndoAction[] = [];
+    if (result.updatedMark && previousMark && previousMark.s !== result.updatedMark.s) {
+      undoActions.push({
+        kind: 'status',
+        markId: result.updatedMark.id!,
+        previousStatus: previousMark.s,
+        newStatus: result.updatedMark.s,
+      });
+    }
+    if (marksToDelete.length) {
+      undoActions.push({ kind: 'erase', marks: marksToDelete });
+    }
+    if (result.addedMark) {
+      undoActions.push({ kind: 'add', mark: result.addedMark });
+    }
+
+    const deletedIds = new Set(marksToDelete.map((mark) => mark.id).filter(Boolean));
+    marks = marks.filter((mark) => !mark.id || !deletedIds.has(mark.id));
+    if (result.updatedMark) {
+      const updatedIndex = previousMark
+        ? marks.indexOf(previousMark)
+        : marks.findIndex((mark) => mark.id === result.updatedMark?.id);
+      if (updatedIndex >= 0) marks[updatedIndex] = result.updatedMark;
+      else marks.push(result.updatedMark);
+    }
+    if (result.addedMark && !marks.some((mark) => mark.id && mark.id === result.addedMark?.id)) {
+      marks.push(result.addedMark);
+    }
+    if (undoActions.length === 1) {
+      recordUndo(undoActions[0]);
+    } else if (undoActions.length > 1) {
+      recordUndo({ kind: 'batch', actions: undoActions });
+    }
+    refreshStatusUi();
+    saveState();
+
+    const fillForPanel = result.updatedMark?.t === 'f'
+      ? result.updatedMark
+      : result.addedMark?.t === 'f'
+        ? result.addedMark
+        : null;
+    if (fillForPanel) openLotPanelFor(fillForPanel, fillForPanel === result.addedMark);
+
+    if (result.updatedMark && previousMark && previousMark.s !== result.updatedMark.s) {
+      showActionToast(
+        toastElement,
+        'Lot status updated.',
+        'Undo',
+        async () => undo(),
+        5000
+      );
     }
   }
 }
@@ -982,6 +1702,7 @@ stage.addEventListener('pointerdown', (e: PointerEvent) => {
     if (hitLegend) {
       isDraggingLegend = true;
       pointerMoved = true;
+      legendDragStartPosition = [...legendPos];
       legendDragOffsetX = x - bounds.x;
       legendDragOffsetY = y - bounds.y;
       e.preventDefault();
@@ -1031,11 +1752,33 @@ window.addEventListener('pointermove', (e: PointerEvent) => {
   }
 });
 
-const handlePointerUp = () => {
+const handlePointerUp = async () => {
   if (isDraggingLegend) {
     isDraggingLegend = false;
     legendDragOffsetX = 0;
     legendDragOffsetY = 0;
+    const previousPosition = legendDragStartPosition;
+    legendDragStartPosition = null;
+    if (previousPosition && (previousPosition[0] !== legendPos[0] || previousPosition[1] !== legendPos[1])) {
+      if (!currentUser || !currentProjectId) {
+        legendPos = previousPosition;
+        renderAll();
+        saveState();
+        showToast(toastElement, 'Legend changes require a connected Supabase project.');
+        return;
+      }
+      const nextPosition: [number, number] = [...legendPos];
+      const { error } = await saveProjectLegendPosition(currentProjectId, nextPosition);
+      if (error) {
+        legendPos = previousPosition;
+        renderAll();
+        saveState();
+        showToast(toastElement, `Could not save legend position: ${error.message}`);
+        return;
+      }
+      recordUndo({ kind: 'legend', previous: previousPosition, next: nextPosition });
+      saveState();
+    }
     return;
   }
 
@@ -1080,9 +1823,7 @@ stage.addEventListener(
       currentZoom,
       panX,
       panY,
-      stage,
-      mapWidth,
-      mapHeight
+      stage
     );
     currentZoom = res.zoom;
     panX = res.panX;
@@ -1137,9 +1878,7 @@ stage.addEventListener(
         initialPinchZoom,
         initialPinchPanX + (currentMidX - initialPinchMidX),
         initialPinchPanY + (currentMidY - initialPinchMidY),
-        stage,
-        mapWidth,
-        mapHeight
+        stage
       );
       currentZoom = res.zoom;
       panX = res.panX;
@@ -1163,11 +1902,123 @@ stage.addEventListener(
 initModeButtons(
   modeButtons,
   currentMode,
-  (newMode) => {
-    currentMode = newMode;
-  },
+  setMode,
   box
 );
+
+async function restoreLastClear(): Promise<void> {
+  if (currentUserRole !== 'admin' && currentUserRole !== 'editor') return;
+  if (!mapWidth || !mapHeight) {
+    showToast(toastElement, 'Wait for the map to finish loading before restoring it.');
+    return;
+  }
+
+  let snapshot: ClearRecoverySnapshot | null;
+  try {
+    snapshot = loadClearRecoverySnapshot(localStorage, getClearRecoveryScope());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(toastElement, `Could not read the clear recovery snapshot: ${message}`);
+    return;
+  }
+  if (!snapshot) {
+    updateClearRecoveryButton();
+    showToast(toastElement, 'There is no saved clear to restore for this project.');
+    return;
+  }
+
+  const restoredMarks: Mark[] = [];
+  try {
+    if (currentUser && currentProjectId) {
+      for (const mark of snapshot.marks) {
+        if (!mark.id) {
+          throw new Error('A saved map mark has no ID and cannot be restored to the project.');
+        }
+        const { data, error } = await saveMark({
+          id: mark.id,
+          project_id: currentProjectId,
+          x: mark.x / mapWidth,
+          y: mark.y / mapHeight,
+          status: mark.s,
+          kind: mark.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
+        if (error || !data) {
+          throw error || new Error('Saving a restored map mark returned no row.');
+        }
+        restoredMarks.push({
+          ...mark,
+          updated_at: data.updated_at,
+          updated_by: data.updated_by,
+        });
+      }
+
+      for (const row of snapshot.lots) {
+        if (!row.mark_id) continue;
+        upsertLotRow(await saveLot({
+          projectId: currentProjectId,
+          markId: row.mark_id,
+          phase: row.phase,
+          block: row.block,
+          lot: row.lot,
+          status: row.status,
+        }));
+      }
+
+      await reloadMarksFromSupabase(currentProjectId);
+      lotRows = await listLots(currentProjectId);
+      lotTable.setRows(lotRows);
+    } else {
+      restoredMarks.push(...snapshot.marks);
+      const restoredIds = new Set(restoredMarks.map((mark) => mark.id).filter(Boolean));
+      marks = marks.filter((mark) => {
+        if (mark.id) return !restoredIds.has(mark.id);
+        return !restoredMarks.some(
+          (restored) =>
+            !restored.id &&
+            restored.t === mark.t &&
+            restored.x === mark.x &&
+            restored.y === mark.y &&
+            restored.s === mark.s
+        );
+      });
+      marks.push(...restoredMarks);
+    }
+
+    removeClearRecoverySnapshot(localStorage, snapshot.scope);
+    history = [];
+    saveState();
+    renderAll();
+    updateClearRecoveryButton();
+    showToast(toastElement, `Restored ${snapshot.marks.length} map marks.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (currentUser && currentProjectId) {
+      try {
+        await reloadMarksFromSupabase(currentProjectId);
+        lotRows = await listLots(currentProjectId);
+        lotTable.setRows(lotRows);
+      } catch (refreshError) {
+        const refreshMessage =
+          refreshError instanceof Error ? refreshError.message : String(refreshError);
+        showToast(
+          toastElement,
+          `Restore was incomplete: ${message}. Refresh also failed: ${refreshMessage}. The recovery snapshot was kept for another attempt.`
+        );
+        return;
+      }
+    }
+    showToast(
+      toastElement,
+      `Restore was incomplete: ${message}. The recovery snapshot was kept for another attempt.`
+    );
+  }
+}
+
+restoreClearButton.addEventListener('click', () => {
+  restoreClearButton.closest('details')?.removeAttribute('open');
+  void restoreLastClear();
+});
 
 initActionButtons(
   {
@@ -1189,21 +2040,107 @@ initActionButtons(
       if (currentUserRole !== 'admin' && currentUserRole !== 'editor') {
         return;
       }
-      if (marks.length > 0) {
-        snapshot();
-
-        // If authenticated and project_id exists, delete all marks from Supabase
-        if (currentUser && currentProjectId) {
-          const { error } = await clearAllMarks(currentProjectId);
-          if (error) {
-            console.warn('Supabase clearAllMarks error:', error.message);
-          }
+      let marksBeforeClear: Mark[];
+      if (currentUser && currentProjectId) {
+        const { data, error } = await loadMarks(currentProjectId);
+        if (error || !data) {
+          showToast(
+            toastElement,
+            `Could not load the current map marks: ${error?.message ?? 'No mark data was returned.'}`
+          );
+          return;
         }
+        marksBeforeClear = data.map(markForClearRecovery);
+      } else {
+        marksBeforeClear = marks.map((mark) => ({
+          ...mark,
+          sp: mark.sp?.map((span) => [...span] as [number, number, number]),
+        }));
+      }
 
+      if (!marksBeforeClear.length) {
         marks = [];
         refreshStatusUi();
         saveState();
+        showToast(toastElement, 'There are no map marks to clear.');
+        return;
       }
+
+      let previousSnapshot: ClearRecoverySnapshot | null;
+      try {
+        previousSnapshot = loadClearRecoverySnapshot(localStorage, getClearRecoveryScope());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        showToast(toastElement, `Cannot safely clear the map: ${message}`);
+        return;
+      }
+
+      if (!window.confirm(
+        `Clear all ${marksBeforeClear.length} map marks? A recovery copy will be saved, and Lot Register rows will remain.`
+      )) {
+        return;
+      }
+
+      const markIds = new Set(
+        marksBeforeClear.map((mark) => mark.id).filter((id): id is string => Boolean(id))
+      );
+      const lotsBeforeClear = lotRows
+        .filter((row) => row.mark_id && markIds.has(row.mark_id))
+        .map((row) => ({ ...row }));
+      const currentSnapshot: ClearRecoverySnapshot = {
+        scope: getClearRecoveryScope(),
+        clearedAt: new Date().toISOString(),
+        marks: marksBeforeClear,
+        lots: lotsBeforeClear,
+      };
+      const snapshot = mergeClearRecoverySnapshots(previousSnapshot, currentSnapshot);
+      try {
+        saveClearRecoverySnapshot(localStorage, snapshot);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        showToast(toastElement, `Could not save a recovery copy; the map was not cleared: ${message}`);
+        return;
+      }
+
+      if (currentUser && currentProjectId) {
+        const { error } = await clearAllMarks(currentProjectId);
+        if (error) {
+          updateClearRecoveryButton();
+          showToast(toastElement, `Could not clear map: ${error.message}`);
+          return;
+        }
+
+        const { data, error: verifyError } = await loadMarks(currentProjectId);
+        if (verifyError || !data) {
+          updateClearRecoveryButton();
+          showToast(
+            toastElement,
+            `Clear was sent, but its result could not be verified: ${verifyError?.message ?? 'No mark data was returned.'}. The recovery copy is available.`
+          );
+          return;
+        }
+        if (data.length) {
+          marks = data
+            .map(markFromRow)
+            .filter((mark): mark is Mark => mark !== null);
+          refreshStatusUi();
+          saveState();
+          updateClearRecoveryButton();
+          showToast(
+            toastElement,
+            `Could not clear all marks; ${data.length} remain on the map. The recovery copy is available.`
+          );
+          return;
+        }
+      }
+
+      history = [];
+      marks = [];
+      recordUndo({ kind: 'clear', snapshot });
+      refreshStatusUi();
+      saveState();
+      updateClearRecoveryButton();
+      showActionToast(toastElement, 'Map cleared. A recovery copy is available.', 'Undo', async () => undo(), 10000);
     },
     onZoomOut: () => setZoom(0.8),
     onZoomIn: () => setZoom(1.25),
@@ -1284,7 +2221,16 @@ initKeyboardShortcuts({
   },
   onSetMode: (mode) => {
     if (currentUserRole === 'admin' || currentUserRole === 'editor') {
-      setMode(mode);
+      void setMode(mode);
+    }
+  },
+  onToggleLotTable: () => {
+    if (
+      stage.style.display !== 'none' &&
+      lotTableButton.style.display !== 'none' &&
+      lotTableButton.getClientRects().length > 0
+    ) {
+      lotTableButton.click();
     }
   },
 });
@@ -1312,6 +2258,7 @@ try {
 persistStatuses();
 
 legendCancelBtn?.addEventListener('click', closeLegendEditor);
+btnAddStatus?.addEventListener('click', () => openLegendEditor('add'));
 legendBackdrop?.addEventListener('click', (event) => {
   if (event.target === legendBackdrop) {
     closeLegendEditor();
@@ -1438,13 +2385,17 @@ if (authScreen && appRoot && authForm && authEmail && authPassword && authError)
       onSignOut: () => {
         currentUser = null;
         currentUserRole = 'viewer';
+        clearProjectSubscriptions();
+        lotPanel.hide();
+        lotTable.close();
+        lotTable.setRows([]);
+        lotTable.setCanEdit(false);
+        lotRows = [];
+        lotTableButton.style.display = 'none';
+        currentProjectId = null;
         showAuthScreen({ authScreen, appRoot, disabledScreen });
 
         // Unsubscribe from real-time and clear map canvas memory
-        if (marksSubscriptionCleanup) {
-          marksSubscriptionCleanup();
-          marksSubscriptionCleanup = null;
-        }
         marks = [];
         history = [];
         renderAll();

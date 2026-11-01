@@ -8,7 +8,11 @@ dist-ssr/
 # Environment variables — NEVER commit these
 .env
 .env.local
+.env.development
+.env.production
+.env.*
 .env.*.local
+!.env.example
 
 # Vite cache
 .vite/
@@ -40,8 +44,11 @@ pnpm-debug.log*
 Build Plan.md
 build_steps.md
 
-# env
-.env
-
 # Documentation & internal notes
-docs/
+docs/*
+!docs/lot-register-roadmap-v2.md
+!docs/db-tests/
+!docs/db-tests/**
+!docs/lot-register/
+docs/lot-register/*
+!docs/lot-register/progress.md

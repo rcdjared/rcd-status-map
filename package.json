@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "node --test",
     "lint": "eslint src/ --ext .ts",
     "typecheck": "tsc --noEmit"
   },
@@ -20,6 +21,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
     "jspdf": "^4.2.1",
-    "pdfjs-dist": "^6.4.299"
+    "pdfjs-dist": "^6.4.299",
+    "xlsx": "^0.18.5"
   }
 }

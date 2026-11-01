@@ -214,9 +214,7 @@ export function zoomAtCursor(
   currentZoom: number,
   panX: number,
   panY: number,
-  stageElement: HTMLElement,
-  _mapWidth: number,
-  _mapHeight: number
+  stageElement: HTMLElement
 ): { zoom: number; panX: number; panY: number } {
   const stageRect = stageElement.getBoundingClientRect();
   const relX = cursorX - stageRect.left;

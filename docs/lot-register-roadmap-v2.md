@@ -536,6 +536,7 @@ PHASE 7: table view. Create src/ui/lot-table.ts, shown next to the form (tab or 
 - Filter by phase, block, status; search box for PBL text.
 - Clicking a row highlights that lot on the map and pans/zooms it into view (reuse coordinate helpers in src/map/).
 - Editors and admins edit status inline via updateLotStatus; viewers are read-only.
+- Editors and admins can edit Phase, Block, and Lot values or delete a register entry; deleting a linked entry keeps its map fill.
 - Subscribe with subscribeLots; changes from other users appear live; unsubscribe on project switch.
 - Empty state and row count. Stay responsive at about 2,000 rows (no virtualization unless measured to be needed; tell me).
 ```
@@ -543,6 +544,7 @@ PHASE 7: table view. Create src/ui/lot-table.ts, shown next to the form (tab or 
 **Done when**
 - [ ] Sorting, filtering, and search work together
 - [ ] Row click highlights the correct lot
+- [ ] Editors can correct or delete PBL entries without deleting linked map fills
 - [ ] Two browsers: an edit in one appears in the other
 - [ ] Switching projects does not leak subscriptions
 

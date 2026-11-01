@@ -9,6 +9,12 @@ export interface SaveLotInput {
   status: string;
 }
 
+export interface UpdateLotDetailsInput {
+  phase: string;
+  block: string;
+  lot: string;
+}
+
 export interface LotRegisterChangeHandlers {
   onInsert?: (row: LotRegisterRow) => void;
   onUpdate?: (row: LotRegisterRow) => void;
@@ -49,6 +55,17 @@ function mapLotRegisterError(error: unknown): Error {
   const details = typeof candidate.details === 'string' ? candidate.details : '';
   const message =
     typeof candidate.message === 'string' ? candidate.message : 'Lot register request failed.';
+
+  if (
+    code === '23505' &&
+    (message.includes('lot_register_project_pbl_key') ||
+      String(candidate.details ?? '').includes('lot_register_project_pbl_key'))
+  ) {
+    return new LotRegisterApiError(
+      'Another register row already uses this phase, block, and lot.',
+      code
+    );
+  }
 
   if (code === 'P0001' && message === 'DUPLICATE_PBL') {
     const conflictingRowId = /conflicting_lot_id=([0-9a-f-]{36})/i.exec(details)?.[1];
@@ -146,6 +163,37 @@ export async function updateLotStatus(
     throwOnDatabaseError(error);
     if (!data) {
       throw new LotRegisterApiError('Updating the lot returned no register row.');
+    }
+    return data;
+  } catch (error) {
+    throw mapThrownError(error);
+  }
+}
+
+export async function updateLotDetails(
+  projectId: string,
+  id: string,
+  details: UpdateLotDetailsInput
+): Promise<LotRegisterRow> {
+  const phase = details.phase.trim().toLocaleUpperCase();
+  const block = details.block.trim().toLocaleUpperCase();
+  const lot = details.lot.trim().toLocaleUpperCase();
+  if (!phase || !block || !lot) {
+    throw new LotRegisterApiError('Phase, block, and lot are required.');
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('lot_register')
+      .update({ phase, block, lot })
+      .eq('id', id)
+      .eq('project_id', projectId)
+      .select('*')
+      .single<LotRegisterRow>();
+
+    throwOnDatabaseError(error);
+    if (!data) {
+      throw new LotRegisterApiError('Updating the lot details returned no register row.');
     }
     return data;
   } catch (error) {

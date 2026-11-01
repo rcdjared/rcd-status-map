@@ -56,6 +56,9 @@ import {
   listLots,
   saveLot,
   subscribeLots,
+  deleteLot,
+  updateLotDetails,
+  updateLotStatus,
   undoLotStatus,
 } from './api/lotRegister';
 import { loadProjects, loadProjectMapImage, populateProjectSelect } from './api/projects';
@@ -80,6 +83,7 @@ import {
   setToolbarMode,
 } from './ui/toolbar';
 import { initLotPanel } from './ui/lot-panel';
+import { initLotTable } from './ui/lot-table';
 
 // DOM Elements
 const baseCanvas = document.querySelector<HTMLCanvasElement>('#base')!;
@@ -91,8 +95,10 @@ const box = document.querySelector<HTMLElement>('#box')!;
 const stage = document.querySelector<HTMLElement>('#stage')!;
 const chipsContainer = document.querySelector<HTMLElement>('#chips')!;
 const mapSelect = document.querySelector<HTMLSelectElement>('#mp')!;
+const lotTableButton = document.querySelector<HTMLButtonElement>('#btn-lot-table')!;
 const btnUploadMap = document.querySelector<HTMLButtonElement>('#btn-upload-map');
 const btnDeleteMap = document.querySelector<HTMLButtonElement>('#btn-delete-map');
+const btnAddStatus = document.querySelector<HTMLButtonElement>('#btn-add-status');
 const duplicateCleanupBtn = document.querySelector<HTMLButtonElement>('#btn-cleanup-duplicates');
 const duplicateCleanupBackdrop = document.querySelector<HTMLElement>('#duplicate-cleanup-backdrop');
 const duplicateCleanupStatus = document.querySelector<HTMLElement>('#duplicate-cleanup-status');
@@ -188,6 +194,26 @@ function upsertLotRow(row: LotRegisterRow): void {
   const index = lotRows.findIndex((lot) => lot.id === row.id);
   if (index >= 0) lotRows[index] = row;
   else lotRows.push(row);
+  lotTable.setRows(lotRows);
+}
+
+function applyLotStatusToMap(row: LotRegisterRow): void {
+  const mark = marks.find((candidate) => candidate.id === row.mark_id);
+  if (!mark || mark.s === row.status) return;
+
+  const previousStatus = mark.s;
+  mark.s = row.status;
+  mark.updated_at = row.updated_at;
+  mark.updated_by = row.updated_by;
+  recordUndo({
+    kind: 'status',
+    markId: mark.id!,
+    previousStatus,
+    newStatus: row.status,
+  });
+  renderAll();
+  saveState();
+  showActionToast(toastElement, 'Lot status updated.', 'Undo', async () => undo(), 5000);
 }
 
 function showExistingLot(rowId: string): void {
@@ -213,27 +239,28 @@ const lotPanel = initLotPanel(stage, {
     );
     const row = await saveLot(input);
     upsertLotRow(row);
-    const mark = marks.find((candidate) => candidate.id === input.markId);
-    if (mark && mark.s !== row.status) {
-      const previousStatus = mark.s;
-      mark.s = row.status;
-      mark.updated_at = row.updated_at;
-      mark.updated_by = row.updated_by;
-      recordUndo({
-        kind: 'status',
-        markId: mark.id!,
-        previousStatus,
-        newStatus: row.status,
-      });
-      if (statuses[row.status]) setStatus(row.status);
-      renderAll();
-      saveState();
-      showActionToast(toastElement, 'Lot status updated.', 'Undo', async () => undo(), 5000);
-    }
+    if (statuses[row.status]) setStatus(row.status);
+    applyLotStatusToMap(row);
     return {
       row,
       linkedExisting: Boolean(unmappedMatch && unmappedMatch.id === row.id),
     };
+  },
+  onCancel: async (context) => {
+    if (!context.discardOnCancel || context.row) return;
+    if (currentProjectId !== context.projectId) {
+      throw new Error('The active project changed before the painted lot could be removed.');
+    }
+    const { error } = await deleteMark(context.markId);
+    if (error) throw error;
+
+    marks = marks.filter((mark) => mark.id !== context.markId);
+    history = history
+      .map((action) => withoutAddedMark(action, context.markId))
+      .filter((action): action is UndoAction => action !== null);
+    refreshStatusUi();
+    saveState();
+    showToast(toastElement, 'Paint canceled; the unregistered fill was removed.');
   },
   onShowExisting: showExistingLot,
   getExistingLotLabel: (rowId) => {
@@ -241,6 +268,34 @@ const lotPanel = initLotPanel(stage, {
     return row ? `${row.phase}/${row.block}/${row.lot}` : null;
   },
 });
+const lotTable = initLotTable(stage, lotTableButton, {
+  onSelectRow: (row) => {
+    if (row.mark_id) highlightMapMark(row.mark_id);
+    else showToast(toastElement, 'This register lot is not linked to a map fill.');
+  },
+  onUpdateStatus: async (row, status) => {
+    const updated = await updateLotStatus(row.id, status);
+    upsertLotRow(updated);
+    applyLotStatusToMap(updated);
+    return updated;
+  },
+  onUpdateDetails: async (row, details) => {
+    if (!currentProjectId) throw new Error('Select a project before editing a lot.');
+    const updated = await updateLotDetails(currentProjectId, row.id, details);
+    upsertLotRow(updated);
+    return updated;
+  },
+  onDeleteRow: async (row) => {
+    await deleteLot(row.id);
+    lotRows = lotRows.filter((candidate) => candidate.id !== row.id);
+    lotTable.setRows(lotRows);
+    showToast(toastElement, `Register entry ${row.phase}/${row.block}/${row.lot} deleted.`);
+  },
+  onError: (message) => showToast(toastElement, `Lot register action failed: ${message}`),
+});
+lotTable.setStatuses(statuses);
+lotTableButton.addEventListener('click', () => void lotPanel.dismiss());
+lotTableButton.addEventListener('click', switchToMap);
 
 // 2D Pan and Drag State (supports dragging in all directions)
 let panX = 0;
@@ -261,7 +316,7 @@ function switchToMap(): void {
   if (navMapBtn) navMapBtn.classList.add('on');
   if (navUsersBtn) navUsersBtn.classList.remove('on');
   if (stage) stage.style.display = 'block';
-  if (headerControls) headerControls.style.display = 'flex';
+  if (headerControls) headerControls.style.display = 'grid';
   if (statusHint) statusHint.style.display = 'block';
   if (usersView) usersView.style.display = 'none';
 }
@@ -273,6 +328,8 @@ async function switchToUsers(): Promise<void> {
   }
   if (navUsersBtn) navUsersBtn.classList.add('on');
   if (navMapBtn) navMapBtn.classList.remove('on');
+  lotPanel.hide();
+  lotTable.close();
   if (stage) stage.style.display = 'none';
   if (headerControls) headerControls.style.display = 'none';
   if (statusHint) statusHint.style.display = 'none';
@@ -359,6 +416,7 @@ function applyStatusConfig(config: ProjectStatusConfig | null): void {
     delete (statuses as Record<string, { n: string; c: string } >)[key];
   }
   Object.assign(statuses, merged);
+  lotTable.setStatuses(statuses);
 
   const currentKeyExists = currentStatus && Object.prototype.hasOwnProperty.call(merged, currentStatus);
   if (!currentKeyExists) {
@@ -366,6 +424,7 @@ function applyStatusConfig(config: ProjectStatusConfig | null): void {
   }
 
   renderChips(chipsContainer, statuses, currentStatus, {
+    selectable: false,
     onSelect: (key) => setStatus(key),
     onColorChange: (key, newColor) => {
       if (statuses[key]) {
@@ -396,12 +455,24 @@ function recordUndo(action: UndoAction): void {
   }
 }
 
+function withoutAddedMark(action: UndoAction, markId: string): UndoAction | null {
+  if (action.kind === 'add' && action.mark.id === markId) return null;
+  if (action.kind !== 'batch') return action;
+  const actions = action.actions
+    .map((child) => withoutAddedMark(child, markId))
+    .filter((child): child is UndoAction => child !== null);
+  return actions.length ? { ...action, actions } : null;
+}
+
 function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   currentUserRole = role;
   const isAdmin = role === 'admin';
   const isEditor = role === 'editor';
   const canEdit = isAdmin || isEditor;
   if (!canEdit) lotPanel.hide();
+  lotTable.setCanEdit(canEdit);
+  lotTableButton.style.display = currentUser && currentProjectId ? 'flex' : 'none';
+  if (btnAddStatus) btnAddStatus.style.display = canEdit ? 'inline-flex' : 'none';
 
   if (canEdit) {
     document.body.classList.remove('role-viewer');
@@ -431,7 +502,7 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
     if (role === 'admin') {
       statusHint.textContent = '';
     } else if (role === 'editor') {
-      statusHint.textContent = 'Editor Mode: Click a lot to paint · drag to pan · keys 1 2 3 = status';
+      statusHint.textContent = 'Editor Mode: Paint a lot, then set its P/B/L and status in Lot details · drag to pan';
     } else if (role === 'disabled') {
       statusHint.textContent = 'Your account has been disabled. Please contact an administrator.';
     } else {
@@ -452,7 +523,11 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
     btnDeleteMap.style.display = isAdmin ? 'inline-flex' : 'none';
   }
   if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
-    setDuplicateCleanupAdmin(duplicateCleanupBackdrop, duplicateCleanupBtn, isAdmin);
+    setDuplicateCleanupAdmin(
+      duplicateCleanupBackdrop,
+      duplicateCleanupBtn,
+      isAdmin && Boolean(currentProjectId)
+    );
   }
 
   // If user was viewing users panel and got demoted, redirect back to map
@@ -545,6 +620,7 @@ function setupRealtimeForCurrentProject(projectId: string): void {
     onUpdate: upsertLotRow,
     onDelete: ({ id }) => {
       lotRows = lotRows.filter((row) => row.id !== id);
+      lotTable.setRows(lotRows);
     },
   });
 }
@@ -603,6 +679,11 @@ function highlightMapMark(markId: string): void {
   }
 
   highlightedMarkId = markId;
+  currentZoom = Math.max(
+    currentZoom,
+    Math.min(0.75, stage.clientWidth / (mapWidth * 0.4))
+  );
+  applyZoom(box, mapWidth, currentZoom, mapHeight);
   panX = stage.clientWidth / 2 - mark.x * currentZoom;
   panY = stage.clientHeight / 2 - mark.y * currentZoom;
   applyTransform(box, panX, panY);
@@ -616,7 +697,7 @@ function highlightMapMark(markId: string): void {
   }, 3000);
 }
 
-function openLotPanelFor(mark: Mark): void {
+function openLotPanelFor(mark: Mark, discardOnCancel = false): void {
   if (
     mark.t !== 'f' ||
     !mark.id ||
@@ -626,9 +707,16 @@ function openLotPanelFor(mark: Mark): void {
   ) {
     return;
   }
+  lotTable.close();
   const row = lotRows.find((candidate) => candidate.mark_id === mark.id) ?? null;
   lotPanel.open(
-    { projectId: currentProjectId, markId: mark.id, status: mark.s, row },
+    {
+      projectId: currentProjectId,
+      markId: mark.id,
+      status: mark.s,
+      row,
+      discardOnCancel,
+    },
     statuses
   );
 }
@@ -852,6 +940,7 @@ function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void
 }
 
 async function persistStatuses(): Promise<void> {
+  lotTable.setStatuses(statuses);
   const savedStatuses = Object.fromEntries(
     Object.entries(statuses).map(([k, v]) => [k, { n: v.n, c: v.c }])
   );
@@ -866,6 +955,7 @@ async function persistStatuses(): Promise<void> {
   }
 
   renderChips(chipsContainer, statuses, currentStatus, {
+    selectable: false,
     onSelect: (key) => setStatus(key),
     onColorChange: (key, newColor) => {
       if (statuses[key]) {
@@ -889,6 +979,7 @@ async function persistStatuses(): Promise<void> {
         currentStatus = nextKey;
       }
       renderChips(chipsContainer, statuses, currentStatus, {
+        selectable: false,
         onSelect: (chipKey) => setStatus(chipKey),
         onColorChange: (chipKey, newColor) => {
           if (statuses[chipKey]) {
@@ -951,7 +1042,10 @@ async function openMap(index: number): Promise<void> {
   currentMapIndex = index;
   clearProjectSubscriptions();
   lotPanel.close();
+  lotTable.close();
   lotRows = [];
+  lotTable.setRows(lotRows);
+  lotTableButton.style.display = 'none';
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -979,6 +1073,15 @@ async function openMap(index: number): Promise<void> {
 
     // 1. Try to resolve project ID from Supabase
     currentProjectId = await resolveProjectId(index);
+    lotTableButton.style.display =
+      currentUser && currentProjectId ? 'flex' : 'none';
+    if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
+      setDuplicateCleanupAdmin(
+        duplicateCleanupBackdrop,
+        duplicateCleanupBtn,
+        currentUserRole === 'admin' && Boolean(currentProjectId)
+      );
+    }
     if (currentProjectId) {
       const { position, error } = await loadProjectLegendPosition(currentProjectId);
       if (position) legendPos = position;
@@ -1004,6 +1107,7 @@ async function openMap(index: number): Promise<void> {
       }
       try {
         lotRows = await listLots(currentProjectId);
+        lotTable.setRows(lotRows);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         showToast(toastElement, `Could not load lot register: ${message}`);
@@ -1057,7 +1161,17 @@ async function openProject(proj: Project): Promise<void> {
   currentProjectId = proj.id;
   currentProject = proj;
   lotPanel.close();
+  lotTable.close();
   lotRows = [];
+  lotTable.setRows(lotRows);
+  lotTableButton.style.display = currentUser ? 'flex' : 'none';
+  if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
+    setDuplicateCleanupAdmin(
+      duplicateCleanupBackdrop,
+      duplicateCleanupBtn,
+      currentUserRole === 'admin'
+    );
+  }
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -1092,6 +1206,7 @@ async function openProject(proj: Project): Promise<void> {
     }
     try {
       lotRows = await listLots(proj.id);
+      lotTable.setRows(lotRows);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       showToast(toastElement, `Could not load lot register: ${message}`);
@@ -1180,6 +1295,14 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
             syncError instanceof Error ? syncError.message : String(syncError);
           message += `; refreshing from Supabase also failed: ${syncMessage}`;
         }
+        try {
+          lotRows = await listLots(currentProjectId);
+          lotTable.setRows(lotRows);
+        } catch (syncError) {
+          const syncMessage =
+            syncError instanceof Error ? syncError.message : String(syncError);
+          message += `; refreshing the lot register also failed: ${syncMessage}`;
+        }
       }
       showToast(toastElement, `Map change was not fully saved: ${message}`);
     };
@@ -1230,6 +1353,14 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
       ...(result.erasedMark ? [result.erasedMark] : []),
       ...(result.erasedMarks || []),
     ];
+    const erasedMarkIds = new Set(
+      marksToDelete.map((mark) => mark.id).filter((id): id is string => Boolean(id))
+    );
+    const registerRowsForErasedMarks = new Set(
+      lotRows
+        .filter((row) => row.mark_id && erasedMarkIds.has(row.mark_id))
+        .map((row) => row.id)
+    );
     if (shouldPersist) {
       for (const mark of marksToDelete) {
         if (!mark.id) continue;
@@ -1239,6 +1370,27 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
           return;
         }
         remoteChanged = true;
+      }
+      if (marksToDelete.some((mark) => mark.id) && currentProjectId) {
+        try {
+          lotRows = await listLots(currentProjectId);
+          lotTable.setRows(lotRows);
+          const unmappedCount = lotRows.filter(
+            (row) => registerRowsForErasedMarks.has(row.id) && row.mark_id === null
+          ).length;
+          if (unmappedCount > 0) {
+            showToast(
+              toastElement,
+              `${unmappedCount} register row${unmappedCount === 1 ? '' : 's'} kept as unmapped.`
+            );
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await syncAfterFailure(
+            new Error(`Map marks were erased, but the register could not be refreshed: ${message}`)
+          );
+          return;
+        }
       }
     }
 
@@ -1302,7 +1454,7 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
       : result.addedMark?.t === 'f'
         ? result.addedMark
         : null;
-    if (fillForPanel) openLotPanelFor(fillForPanel);
+    if (fillForPanel) openLotPanelFor(fillForPanel, fillForPanel === result.addedMark);
 
     if (result.updatedMark && previousMark && previousMark.s !== result.updatedMark.s) {
       showActionToast(
@@ -1785,6 +1937,7 @@ try {
 persistStatuses();
 
 legendCancelBtn?.addEventListener('click', closeLegendEditor);
+btnAddStatus?.addEventListener('click', () => openLegendEditor('add'));
 legendBackdrop?.addEventListener('click', (event) => {
   if (event.target === legendBackdrop) {
     closeLegendEditor();
@@ -1911,6 +2064,14 @@ if (authScreen && appRoot && authForm && authEmail && authPassword && authError)
       onSignOut: () => {
         currentUser = null;
         currentUserRole = 'viewer';
+        clearProjectSubscriptions();
+        lotPanel.hide();
+        lotTable.close();
+        lotTable.setRows([]);
+        lotTable.setCanEdit(false);
+        lotRows = [];
+        lotTableButton.style.display = 'none';
+        currentProjectId = null;
         if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
           setDuplicateCleanupAdmin(duplicateCleanupBackdrop, duplicateCleanupBtn, false);
           duplicateCleanupBackdrop.style.display = 'none';
@@ -1919,10 +2080,6 @@ if (authScreen && appRoot && authForm && authEmail && authPassword && authError)
         showAuthScreen({ authScreen, appRoot, disabledScreen });
 
         // Unsubscribe from real-time and clear map canvas memory
-        if (marksSubscriptionCleanup) {
-          marksSubscriptionCleanup();
-          marksSubscriptionCleanup = null;
-        }
         marks = [];
         history = [];
         renderAll();

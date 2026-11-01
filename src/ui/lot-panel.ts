@@ -10,6 +10,7 @@ export interface LotPanelContext {
   markId: string;
   status: string;
   row: LotRegisterRow | null;
+  discardOnCancel?: boolean;
 }
 
 export interface LotPanelSaveResult {
@@ -19,12 +20,14 @@ export interface LotPanelSaveResult {
 
 export interface LotPanelCallbacks {
   onSave: (input: SaveLotInput) => Promise<LotPanelSaveResult>;
+  onCancel: (context: LotPanelContext) => Promise<void>;
   onShowExisting: (rowId: string) => void;
   getExistingLotLabel: (rowId: string) => string | null;
 }
 
 export interface LotPanel {
   open(context: LotPanelContext, statuses: StatusMap): void;
+  dismiss(): Promise<void>;
   close(): void;
   hide(): void;
   isOpen(): boolean;
@@ -79,6 +82,8 @@ export function initLotPanel(
   let context: LotPanelContext | null = null;
   let duplicateKey: string | null = null;
   let duplicateRowId: string | null = null;
+  let saving = false;
+  let dismissing = false;
 
   const storageKey = (projectId: string): string => `rrh-lot-pbl-v1-${projectId}`;
   const currentPblKey = (): string =>
@@ -127,8 +132,29 @@ export function initLotPanel(
     context = null;
   };
 
-  closeButton.addEventListener('click', close);
-  cancelButton.addEventListener('click', close);
+  const dismiss = async (): Promise<void> => {
+    if (!context || saving || dismissing) return;
+    dismissing = true;
+    closeButton.disabled = true;
+    cancelButton.disabled = true;
+    warning.hidden = true;
+    try {
+      if (context.discardOnCancel && !context.row) {
+        await callbacks.onCancel(context);
+      }
+      close();
+    } catch (error) {
+      warning.textContent = error instanceof Error ? error.message : String(error);
+      warning.hidden = false;
+    } finally {
+      dismissing = false;
+      closeButton.disabled = false;
+      cancelButton.disabled = false;
+    }
+  };
+
+  closeButton.addEventListener('click', () => void dismiss());
+  cancelButton.addEventListener('click', () => void dismiss());
   showExisting.addEventListener('click', () => {
     if (duplicateRowId) callbacks.onShowExisting(duplicateRowId);
   });
@@ -138,7 +164,7 @@ export function initLotPanel(
   panel.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      close();
+      void dismiss();
     }
   });
 
@@ -149,6 +175,7 @@ export function initLotPanel(
     const pblKey = currentPblKey();
     if (duplicateKey === pblKey) return;
     saveButton.disabled = true;
+    saving = true;
     message.textContent = '';
     warning.hidden = true;
     showExisting.hidden = true;
@@ -185,6 +212,8 @@ export function initLotPanel(
         warning.hidden = false;
         saveButton.disabled = false;
       }
+    } finally {
+      saving = false;
     }
   });
 
@@ -199,6 +228,8 @@ export function initLotPanel(
       message.textContent = '';
       panel.hidden = false;
       saveButton.disabled = false;
+      closeButton.disabled = false;
+      cancelButton.disabled = false;
 
       let sticky: { phase?: string; block?: string } = {};
       try {
@@ -228,6 +259,7 @@ export function initLotPanel(
       statusSelect.value = nextContext.row?.status ?? nextContext.status;
       lotInput.focus();
     },
+    dismiss,
     close,
     hide() {
       close();

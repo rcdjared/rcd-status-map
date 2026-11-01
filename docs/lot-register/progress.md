@@ -14,7 +14,7 @@ the v2 phase sequence.
 | 3 | Access rules and hardening | [ ] | [ ] | [ ] |
 | 4 | Register schema | [x] | [ ] | [ ] |
 | 5 | Register API | [x] | [ ] | [ ] |
-| 6 | Side panel form | n/a | n/a | [ ] |
+| 6 | Side panel form | [x] | [ ] | [ ] |
 | 7 | Table view | n/a | n/a | [ ] |
 | 8 | Summary and export | n/a | n/a | [ ] |
 | 9 | Description templates | [ ] | [ ] | [ ] |
@@ -127,19 +127,46 @@ the v2 phase sequence.
 - Dev verification is recorded as passed. Production application and PR merge
   remain outstanding.
 
-### Phase 6 — Side panel form (implementation in progress)
+### Phase 6 — Side panel form (dev verified; production pending)
 
-- Starting the editor-only form, persistent per-project PBL defaults, duplicate
-  handling, and in-place map repaint wiring.
-- Atomic undo of a linked register/mark status needs a database operation; this
-  phase adds it so the roadmap's undo action cannot leave the two statuses out
-  of sync.
 - Added migration 016 and a rollback-only undo test, plus the lot side panel,
   sticky fields, duplicate guidance/highlight, paint integration, and 5-second
   status undo action.
 - User reports: `PASS: linked lot status undo is atomic; fixtures rolled back.`
   The Phase 6 database undo verification is recorded as passed.
+- User confirms Phase 6 manual checks passed. The side panel, duplicate
+  correction/highlight, sticky fields, repaint, and Undo are recorded as
+  verified; production application and PR merge remain outstanding.
 - `npm run build`, `npm run lint`, `npm test` (4 tests), and `git diff --check`
-  pass; build retains the existing large-chunk warning. Browser/manual checks
-  for the lot panel, duplicate correction, sticky fields, repaint, and Undo
-  remain outstanding before Phase 6 is complete.
+  pass; build retains the existing large-chunk warning.
+
+### Phase 7 — Table view (implementation in progress)
+
+- Added a live register drawer with combined phase/block/status filters, PBL
+  search, natural sorting, status chips, inline editor/admin status updates,
+  row-to-map highlighting, and project-scoped realtime updates.
+- Kept a normal DOM table without virtualization for the roadmap's ~2,000-row
+  scale; performance has not yet been measured with a populated 2,000-row set.
+- `npm run build`, `npm run typecheck`, `npm run lint`, `npm test` (5 tests),
+  and `git diff --check` pass. Build retains the existing large-chunk warning.
+- Browser verification was not run because the local Playwright Chromium
+  executable is unavailable. Two-browser realtime and project-switch checks
+  remain pending.
+
+### Phase 7 — Table follow-up
+
+- User confirmed erased map fills should keep their register data. Erasing now
+  refreshes the register immediately, identifies preserved rows as `Unmapped`,
+  and notifies the editor that the register entry was retained.
+- Editors and admins can now edit Phase/Block/Lot values and delete individual
+  register entries from the table. Deleting a linked entry leaves its map fill
+  in place; duplicate PBL values and blank fields are reported.
+- Opening a new painted lot's PBL form closes the register table so it cannot
+  cover the inputs. Cancel, close, or Escape removes the newly painted fill if
+  it has not been registered; saved lots and pre-existing fills are preserved.
+- Reorganized the header into project/map-management and status controls, with
+  all map tools and view actions grouped together in one toolbar.
+- Build, typecheck, lint, five tests, and `git diff --check` pass. Browser
+  inspection reached the sign-in screen; authenticated table actions and the
+  signed-in header still need manual verification. Two-browser realtime and
+  project-switch checks remain pending.

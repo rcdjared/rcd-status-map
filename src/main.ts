@@ -57,6 +57,9 @@ import {
   saveLot,
   subscribeLots,
   deleteLot,
+  getDisplayNames,
+  listLotHistory,
+  restoreLotHistory,
   updateLotDetails,
   updateLotStatus,
   undoLotStatus,
@@ -370,6 +373,29 @@ const lotTable = initLotTable(stage, lotTableButton, {
     lotRows = lotRows.filter((candidate) => candidate.id !== row.id);
     lotTable.setRows(lotRows);
     showToast(toastElement, `Register entry ${row.phase}/${row.block}/${row.lot} deleted.`);
+  },
+  onLoadDisplayNames: getDisplayNames,
+  onLoadHistory: async (row) => {
+    if (currentProjectId !== row.project_id) {
+      throw new Error('The active project changed before lot history could be loaded.');
+    }
+    const historyRows = await listLotHistory(row.project_id, row.id);
+    const names = await getDisplayNames(
+      historyRows.map((entry) => entry.changed_by ?? '')
+    );
+    return historyRows.map((entry) => ({
+      ...entry,
+      actorName: names.get(entry.changed_by ?? '')?.trim() || 'Former user',
+    }));
+  },
+  onRestoreHistory: async (entry) => {
+    if (currentProjectId !== entry.project_id) {
+      throw new Error('The active project changed before this version could be restored.');
+    }
+    const updated = await restoreLotHistory(entry.id);
+    upsertLotRow(updated);
+    applyLotStatusToMap(updated);
+    return updated;
   },
   onExportCsv: (rows, filtered) => {
     void exportLotRows(rows, 'csv', filtered);

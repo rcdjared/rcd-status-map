@@ -516,6 +516,106 @@ input:focus-visible,
   opacity: .6;
 }
 
+.lot-history-drawer {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow: hidden;
+  background: var(--sf);
+}
+
+.lot-history-drawer[hidden] {
+  display: none;
+}
+
+.lot-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+}
+
+.lot-history-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.lot-history-subtitle,
+.lot-history-message,
+.lot-history-actor {
+  margin: 2px 0 0;
+  color: var(--mu);
+  font-size: 11px;
+}
+
+.lot-history-close,
+.lot-history-restore {
+  min-height: 30px;
+  padding: 0 9px;
+  color: var(--tx);
+  background: var(--sf);
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.lot-history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0 3px 4px 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.lot-history-entry {
+  padding: 10px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--bg);
+}
+
+.lot-history-entry-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.lot-history-entry-heading time {
+  color: var(--mu);
+  text-align: right;
+}
+
+.lot-history-actor {
+  margin-top: 3px;
+}
+
+.lot-history-changes {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.lot-history-restore:hover:not(:disabled),
+.lot-history-close:hover {
+  border-color: var(--brand-green);
+}
+
+.lot-history-restore:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
 .lot-table-empty {
   margin: 0;
   padding: 22px 10px;

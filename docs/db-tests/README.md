@@ -35,3 +35,15 @@ phase is merged, and record the date, environment, and result in
 `docs/lot-register/progress.md`.
 
 Use [`_template.sql`](./_template.sql) as the starting pattern for phase tests.
+
+Phase-specific Lot Register verification scripts:
+
+- [`phase-4-lot-register.sql`](./phase-4-lot-register.sql)
+- [`phase-5-lot-register-api.sql`](./phase-5-lot-register-api.sql)
+- [`phase-6-lot-register-undo.sql`](./phase-6-lot-register-undo.sql)
+- [`phase-10-lot-register-history.sql`](./phase-10-lot-register-history.sql)
+
+The Phase 10 test requires admin, editor, and viewer accounts. It verifies
+history writes and field diffs, no-op saves, restore behavior, read/write
+permissions, and retention. Run it in dev after applying migrations through
+017; do not treat a successful local build as database verification.

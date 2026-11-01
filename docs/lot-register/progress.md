@@ -203,3 +203,22 @@ the v2 phase sequence.
 - Remaining: custom template storage, template picker/editor controls, and
   copy-to-clipboard action in the lot register UI and project context.
 - Suggested commit message: `feat: add description templates and CSV summary`
+
+### Phase 10 — Register history and retention (implementation in progress)
+
+- Added migration 017 with append-only history rows, field-level JSONB diffs,
+  editor/admin read access, an invoker-rights restore RPC, and an explicit
+  admin-only retention function. Register deletion does not cascade to history.
+- Added last-editor name/date to the table through `get_display_names`; names
+  only are requested, never profile emails. Editors/admins can open a row's
+  history drawer and restore a prior update as a new audited update.
+- Added [storage.md](./storage.md) with size estimates and optional manual
+  `pg_cron` setup, plus rollback-only role/history/retention verification SQL.
+- `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, and
+  `git diff --check` pass. The SQL verification has not been run against dev;
+  migration 017 is not applied by this code change.
+- Remaining: apply migration 017 in dev and run
+  `docs/db-tests/phase-10-lot-register-history.sql`, then manually verify
+  signed-in history/restore behavior before recording the database phase as
+  passed. Production application and PR merge remain outstanding.
+- Suggested commit message: `feat: add lot register history and retention`

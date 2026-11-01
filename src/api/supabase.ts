@@ -59,6 +59,17 @@ export interface LotRegisterRow {
   updated_at: string;
 }
 
+export interface LotRegisterHistoryRow {
+  id: string;
+  register_id: string;
+  project_id: string;
+  action: 'INSERT' | 'UPDATE' | 'DELETE';
+  old_values: Json | null;
+  new_values: Json | null;
+  changed_by: string | null;
+  changed_at: string;
+}
+
 export type Json =
   | string
   | number
@@ -183,6 +194,21 @@ export interface Database {
         };
         Relationships: [];
       };
+      lot_register_history: {
+        Row: LotRegisterHistoryRow;
+        Insert: {
+          id?: string;
+          register_id: string;
+          project_id: string;
+          action: 'INSERT' | 'UPDATE' | 'DELETE';
+          old_values?: Json | null;
+          new_values?: Json | null;
+          changed_by?: string | null;
+          changed_at?: string;
+        };
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -212,6 +238,27 @@ export interface Database {
           p_previous_status: string;
         };
         Returns: LotRegisterRow[];
+      };
+      get_display_names: {
+        Args: {
+          p_profile_ids: string[];
+        };
+        Returns: Array<{
+          id: string;
+          display_name: string | null;
+        }>;
+      };
+      restore_lot_register_history: {
+        Args: {
+          p_history_id: string;
+        };
+        Returns: LotRegisterRow[];
+      };
+      purge_lot_history: {
+        Args: {
+          p_retain?: string;
+        };
+        Returns: number;
       };
     };
     Enums: {

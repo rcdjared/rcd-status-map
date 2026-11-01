@@ -1,4 +1,8 @@
-import { supabase, type LotRegisterRow } from './supabase';
+import {
+  supabase,
+  type LotRegisterHistoryRow,
+  type LotRegisterRow,
+} from './supabase';
 
 export interface SaveLotInput {
   projectId: string;
@@ -19,6 +23,11 @@ export interface LotRegisterChangeHandlers {
   onInsert?: (row: LotRegisterRow) => void;
   onUpdate?: (row: LotRegisterRow) => void;
   onDelete?: (row: Pick<LotRegisterRow, 'id'>) => void;
+}
+
+export interface LotRegisterDisplayName {
+  id: string;
+  display_name: string | null;
 }
 
 export class LotRegisterApiError extends Error {
@@ -119,6 +128,74 @@ export async function listLots(projectId: string): Promise<LotRegisterRow[]> {
     throwOnDatabaseError(error);
     if (!data) {
       throw new LotRegisterApiError('Loading lots returned no data.');
+    }
+    return data;
+  } catch (error) {
+    throw mapThrownError(error);
+  }
+}
+
+export async function listLotHistory(
+  projectId: string,
+  registerId: string
+): Promise<LotRegisterHistoryRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('lot_register_history')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('register_id', registerId)
+      .order('changed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .returns<LotRegisterHistoryRow[]>();
+
+    throwOnDatabaseError(error);
+    if (!data) {
+      throw new LotRegisterApiError('Loading lot history returned no data.');
+    }
+    return data;
+  } catch (error) {
+    throw mapThrownError(error);
+  }
+}
+
+export async function getDisplayNames(
+  profileIds: string[]
+): Promise<Map<string, string | null>> {
+  const uniqueIds = [...new Set(profileIds.filter(Boolean))];
+  if (!uniqueIds.length) return new Map();
+
+  try {
+    const { data, error } = await supabase
+      .rpc('get_display_names', { p_profile_ids: uniqueIds });
+
+    throwOnDatabaseError(error);
+    if (!data) {
+      throw new LotRegisterApiError('Loading editor display names returned no data.');
+    }
+    return new Map<string, string | null>(
+      data.map((entry: LotRegisterDisplayName): [string, string | null] => [
+        entry.id,
+        entry.display_name,
+      ])
+    );
+  } catch (error) {
+    throw mapThrownError(error);
+  }
+}
+
+export async function restoreLotHistory(
+  historyId: string
+): Promise<LotRegisterRow> {
+  try {
+    const { data, error } = await supabase
+      .rpc('restore_lot_register_history', { p_history_id: historyId })
+      .returns<LotRegisterRow[]>()
+      .single();
+
+    throwOnDatabaseError(error);
+    if (!data) {
+      throw new LotRegisterApiError('Restoring lot history returned no register row.');
     }
     return data;
   } catch (error) {

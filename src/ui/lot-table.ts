@@ -1,4 +1,4 @@
-import type { LotRegisterRow } from '../api/supabase';
+import type { Json, LotRegisterHistoryRow, LotRegisterRow } from '../api/supabase';
 import type { StatusMap } from '../map/painting';
 import { summarizeLots } from '../register/summary.ts';
 import { registerEscapeDismissable } from './escape-dismiss.ts';
@@ -36,6 +36,11 @@ export interface LotTableCallbacks {
     details: Pick<LotRegisterRow, 'phase' | 'block' | 'lot'>
   ) => Promise<LotRegisterRow>;
   onDeleteRow: (row: LotRegisterRow) => Promise<void>;
+  onLoadDisplayNames: (profileIds: string[]) => Promise<Map<string, string | null>>;
+  onLoadHistory: (row: LotRegisterRow) => Promise<Array<LotRegisterHistoryRow & {
+    actorName: string;
+  }>>;
+  onRestoreHistory: (history: LotRegisterHistoryRow) => Promise<LotRegisterRow>;
   onExportCsv: (rows: LotRegisterRow[], filtered: boolean) => void;
   onExportXlsx: (rows: LotRegisterRow[], filtered: boolean) => void;
   onError: (message: string) => void;
@@ -93,6 +98,7 @@ export function initLotTable(
             <th scope="col" data-sort="block"><button type="button">Block</button></th>
             <th scope="col" data-sort="lot"><button type="button">Lot</button></th>
             <th scope="col" data-sort="status"><button type="button">Status</button></th>
+            <th scope="col">Last edited</th>
             <th scope="col" data-actions-header hidden>Actions</th>
           </tr></thead>
           <tbody></tbody>
@@ -111,6 +117,17 @@ export function initLotTable(
         <button type="button" data-export="xlsx-filtered">Current XLSX</button>
         <button type="button" data-export="xlsx-all">All XLSX</button>
       </div>
+      <aside class="lot-history-drawer" aria-labelledby="lot-history-title" hidden>
+        <header class="lot-history-header">
+          <div>
+            <h3 id="lot-history-title">Lot history</h3>
+            <p class="lot-history-subtitle"></p>
+          </div>
+          <button type="button" class="lot-history-close" aria-label="Close lot history">×</button>
+        </header>
+        <p class="lot-history-message" aria-live="polite"></p>
+        <ol class="lot-history-list"></ol>
+      </aside>
     </section>`
   );
 
@@ -133,10 +150,20 @@ export function initLotTable(
   const filters = new Map<FilterColumn, HTMLSelectElement>();
   const headers = Array.from(panel.querySelectorAll<HTMLTableCellElement>('th[data-sort]'));
   const actionsHeader = panel.querySelector<HTMLTableCellElement>('[data-actions-header]')!;
+  const historyDrawer = panel.querySelector<HTMLElement>('.lot-history-drawer')!;
+  const historyTitle = panel.querySelector<HTMLElement>('#lot-history-title')!;
+  const historySubtitle = panel.querySelector<HTMLElement>('.lot-history-subtitle')!;
+  const historyMessage = panel.querySelector<HTMLElement>('.lot-history-message')!;
+  const historyList = panel.querySelector<HTMLOListElement>('.lot-history-list')!;
+  const historyCloseButton = panel.querySelector<HTMLButtonElement>('.lot-history-close')!;
   let rows: LotRegisterRow[] = [];
+  let displayNames = new Map<string, string | null>();
   let statuses: StatusMap = {};
   let canEdit = false;
   let editingRowId: string | null = null;
+  let activeHistoryRowId: string | null = null;
+  let displayNameRequest = 0;
+  let historyRequest = 0;
   let sortColumn: SortColumn = 'phase';
   let sortAscending = true;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -201,6 +228,157 @@ export function initLotTable(
         const comparison = compareNatural(left[sortColumn], right[sortColumn]);
         return sortAscending ? comparison : -comparison;
       });
+  };
+
+  const formatUpdatedAt = (value: string): string => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Unknown time' : date.toLocaleString();
+  };
+
+  const loadDisplayNames = (): void => {
+    const request = ++displayNameRequest;
+    const ids = [...new Set(rows.map((row) => row.updated_by).filter(
+      (id): id is string => id !== null && !displayNames.has(id)
+    ))];
+    if (!ids.length) {
+      render();
+      return;
+    }
+
+    void callbacks.onLoadDisplayNames(ids).then((names) => {
+      if (request !== displayNameRequest) return;
+      for (const id of ids) displayNames.set(id, names.get(id) ?? null);
+      render();
+    }).catch((error: unknown) => {
+      if (request !== displayNameRequest) return;
+      for (const id of ids) displayNames.set(id, null);
+      callbacks.onError(
+        `Could not load last-editor display names: ${error instanceof Error ? error.message : String(error)}`
+      );
+      render();
+    });
+  };
+
+  const renderHistory = (
+    history: Array<LotRegisterHistoryRow & { actorName: string }>
+  ): void => {
+    historyList.replaceChildren();
+    if (!history.length) {
+      historyMessage.textContent = 'No history has been recorded for this lot.';
+      return;
+    }
+    historyMessage.textContent = '';
+
+    for (const entry of history) {
+      const item = document.createElement('li');
+      item.className = 'lot-history-entry';
+
+      const heading = document.createElement('div');
+      heading.className = 'lot-history-entry-heading';
+      const action = document.createElement('strong');
+      action.textContent = entry.action === 'INSERT'
+        ? 'Created'
+        : entry.action === 'DELETE'
+          ? 'Deleted'
+          : 'Updated';
+      const changedAt = document.createElement('time');
+      changedAt.dateTime = entry.changed_at;
+      changedAt.textContent = formatUpdatedAt(entry.changed_at);
+      heading.append(action, changedAt);
+      item.append(heading);
+
+      const actor = document.createElement('p');
+      actor.className = 'lot-history-actor';
+      actor.textContent = entry.actorName;
+      item.append(actor);
+
+      const oldValues = entry.old_values && typeof entry.old_values === 'object' &&
+        !Array.isArray(entry.old_values)
+        ? entry.old_values as Record<string, Json | undefined>
+        : {};
+      const newValues = entry.new_values && typeof entry.new_values === 'object' &&
+        !Array.isArray(entry.new_values)
+        ? entry.new_values as Record<string, Json | undefined>
+        : {};
+      const fields = [...new Set([...Object.keys(oldValues), ...Object.keys(newValues)])];
+      const changes = document.createElement('ul');
+      changes.className = 'lot-history-changes';
+      for (const field of fields) {
+        const change = document.createElement('li');
+        const label = field.replaceAll('_', ' ');
+        const oldValue = oldValues[field] === null || oldValues[field] === undefined
+          ? '—'
+          : String(oldValues[field]);
+        const newValue = newValues[field] === null || newValues[field] === undefined
+          ? '—'
+          : String(newValues[field]);
+        change.textContent = entry.action === 'INSERT'
+          ? `${label}: ${newValue}`
+          : entry.action === 'DELETE'
+            ? `${label}: ${oldValue}`
+            : `${label}: ${oldValue} → ${newValue}`;
+        changes.append(change);
+      }
+      item.append(changes);
+
+      if (canEdit && entry.action === 'UPDATE' && fields.length) {
+        const restoreButton = document.createElement('button');
+        restoreButton.type = 'button';
+        restoreButton.className = 'lot-history-restore';
+        restoreButton.textContent = 'Restore this version';
+        restoreButton.addEventListener('click', async () => {
+          restoreButton.disabled = true;
+          try {
+            const updated = await callbacks.onRestoreHistory(entry);
+            rows = rows.map((row) => row.id === updated.id ? updated : row);
+            updateFilters();
+            render();
+            historyMessage.textContent = 'Previous values restored as a new history entry.';
+            const request = ++historyRequest;
+            const selectedRow = rows.find((row) => row.id === updated.id);
+            if (selectedRow) {
+              const refreshed = await callbacks.onLoadHistory(selectedRow);
+              if (request === historyRequest && activeHistoryRowId === selectedRow.id) {
+                renderHistory(refreshed);
+              }
+            }
+          } catch (error) {
+            callbacks.onError(
+              `Could not restore this version: ${error instanceof Error ? error.message : String(error)}`
+            );
+            restoreButton.disabled = false;
+          }
+        });
+        item.append(restoreButton);
+      }
+
+      historyList.append(item);
+    }
+  };
+
+  const openHistory = (row: LotRegisterRow): void => {
+    activeHistoryRowId = row.id;
+    const request = ++historyRequest;
+    historyDrawer.hidden = false;
+    historyTitle.textContent = `History: ${row.phase}/${row.block}/${row.lot}`;
+    historySubtitle.textContent = 'Changes are append-only and cannot be edited or deleted.';
+    historyMessage.textContent = 'Loading history…';
+    historyList.replaceChildren();
+    void callbacks.onLoadHistory(row).then((history) => {
+      if (request !== historyRequest || activeHistoryRowId !== row.id) return;
+      renderHistory(history);
+    }).catch((error: unknown) => {
+      if (request !== historyRequest || activeHistoryRowId !== row.id) return;
+      historyMessage.textContent =
+        `Could not load history: ${error instanceof Error ? error.message : String(error)}`;
+      callbacks.onError(historyMessage.textContent);
+    });
+  };
+
+  const closeHistory = (): void => {
+    activeHistoryRowId = null;
+    historyRequest += 1;
+    historyDrawer.hidden = true;
   };
 
   function render(): void {
@@ -304,6 +482,13 @@ export function initLotTable(
       }
       tr.append(statusCell);
 
+      const lastEdited = document.createElement('td');
+      const editorName = row.updated_by
+        ? displayNames.get(row.updated_by)?.trim()
+        : null;
+      lastEdited.textContent = `${editorName || 'Former user'} · ${formatUpdatedAt(row.updated_at)}`;
+      tr.append(lastEdited);
+
       if (canEdit) {
         const actionsCell = document.createElement('td');
         actionsCell.className = 'lot-table-row-actions';
@@ -352,6 +537,9 @@ export function initLotTable(
             render();
           });
         } else {
+          addAction('History', 'history', 'lot-table-action-history', () => {
+            openHistory(row);
+          });
           addAction('Edit', 'edit', 'lot-table-action-edit', () => {
             editingRowId = row.id;
             render();
@@ -456,6 +644,13 @@ export function initLotTable(
     searchTimer = setTimeout(render, 100);
   });
   closeButton.addEventListener('click', close);
+  historyCloseButton.addEventListener('click', closeHistory);
+  historyDrawer.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeHistory();
+    }
+  });
   panel.addEventListener('pointerdown', (event) => event.stopPropagation());
   panel.addEventListener('click', (event) => event.stopPropagation());
   panel.addEventListener('keydown', (event) => {
@@ -488,6 +683,7 @@ export function initLotTable(
       rows = [...nextRows];
       updateFilters();
       render();
+      loadDisplayNames();
     },
     getRows() {
       return [...rows];
@@ -503,6 +699,7 @@ export function initLotTable(
     setCanEdit(nextCanEdit) {
       canEdit = nextCanEdit;
       if (!canEdit) editingRowId = null;
+      if (!canEdit) closeHistory();
       actionsHeader.hidden = !canEdit;
       render();
     },

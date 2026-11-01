@@ -72,8 +72,13 @@ import { renderChips, selectChip, updateChipCounts } from './ui/chips';
 import { showActionToast, showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
 import { initMapModals } from './ui/map-modals';
-import { initDuplicateCleanup, setDuplicateCleanupAdmin } from './ui/duplicate-cleanup';
 import type { UndoAction } from './map/undo';
+import {
+  loadClearRecoverySnapshot,
+  removeClearRecoverySnapshot,
+  saveClearRecoverySnapshot,
+  type ClearRecoverySnapshot,
+} from './map/clear-recovery';
 import { initTheme } from './ui/theme';
 import {
   initActionButtons,
@@ -84,6 +89,9 @@ import {
 } from './ui/toolbar';
 import { initLotPanel } from './ui/lot-panel';
 import { initLotTable } from './ui/lot-table';
+import { initEscapeDismissal, registerEscapeDismissable } from './ui/escape-dismiss';
+
+initEscapeDismissal();
 
 // DOM Elements
 const baseCanvas = document.querySelector<HTMLCanvasElement>('#base')!;
@@ -96,16 +104,10 @@ const stage = document.querySelector<HTMLElement>('#stage')!;
 const chipsContainer = document.querySelector<HTMLElement>('#chips')!;
 const mapSelect = document.querySelector<HTMLSelectElement>('#mp')!;
 const lotTableButton = document.querySelector<HTMLButtonElement>('#btn-lot-table')!;
+const restoreClearButton = document.querySelector<HTMLButtonElement>('#restore-clear')!;
 const btnUploadMap = document.querySelector<HTMLButtonElement>('#btn-upload-map');
 const btnDeleteMap = document.querySelector<HTMLButtonElement>('#btn-delete-map');
 const btnAddStatus = document.querySelector<HTMLButtonElement>('#btn-add-status');
-const duplicateCleanupBtn = document.querySelector<HTMLButtonElement>('#btn-cleanup-duplicates');
-const duplicateCleanupBackdrop = document.querySelector<HTMLElement>('#duplicate-cleanup-backdrop');
-const duplicateCleanupStatus = document.querySelector<HTMLElement>('#duplicate-cleanup-status');
-const duplicateCleanupTableBody = document.querySelector<HTMLElement>('#duplicate-cleanup-table-body');
-const duplicateCleanupEmpty = document.querySelector<HTMLElement>('#duplicate-cleanup-empty');
-const duplicateCleanupConfirm = document.querySelector<HTMLButtonElement>('#duplicate-cleanup-confirm');
-const duplicateCleanupClose = document.querySelector<HTMLButtonElement>('#duplicate-cleanup-close');
 const loadingIndicator = document.querySelector<HTMLElement>('#ld')!;
 const toastElement = document.querySelector<HTMLElement>('#t')!;
 
@@ -197,9 +199,29 @@ function upsertLotRow(row: LotRegisterRow): void {
   lotTable.setRows(lotRows);
 }
 
+function getClearRecoveryScope(): string {
+  return currentProjectId ?? MAPS[currentMapIndex].id;
+}
+
+function updateClearRecoveryButton(): void {
+  try {
+    const snapshot = loadClearRecoverySnapshot(localStorage, getClearRecoveryScope());
+    restoreClearButton.hidden = !snapshot;
+    if (snapshot) {
+      const clearedAt = new Date(snapshot.clearedAt).toLocaleString();
+      restoreClearButton.textContent =
+        `Restore last clear (${snapshot.marks.length} marks, ${clearedAt})`;
+    }
+  } catch (error) {
+    restoreClearButton.hidden = true;
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(toastElement, `Could not read the clear recovery snapshot: ${message}`);
+  }
+}
+
 function applyLotStatusToMap(row: LotRegisterRow): void {
   const mark = marks.find((candidate) => candidate.id === row.mark_id);
-  if (!mark || mark.s === row.status) return;
+  if (!mark || mark.t !== 'f' || mark.s === row.status) return;
 
   const previousStatus = mark.s;
   mark.s = row.status;
@@ -522,14 +544,6 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   if (btnDeleteMap) {
     btnDeleteMap.style.display = isAdmin ? 'inline-flex' : 'none';
   }
-  if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
-    setDuplicateCleanupAdmin(
-      duplicateCleanupBackdrop,
-      duplicateCleanupBtn,
-      isAdmin && Boolean(currentProjectId)
-    );
-  }
-
   // If user was viewing users panel and got demoted, redirect back to map
   if (!isAdmin && usersView && usersView.style.display !== 'none') {
     switchToMap();
@@ -817,13 +831,54 @@ async function undo(): Promise<void> {
         touchedMarks.add(erased.id);
       }
       if (failure) break;
+    } else if (inverse.kind === 'clear') {
+      for (const erased of inverse.snapshot.marks) {
+        if (!erased.id) {
+          failure = new Error('A cleared mark has no saved ID and cannot be restored safely.');
+          break;
+        }
+        const { error } = await saveMark({
+          id: erased.id,
+          project_id: currentProjectId,
+          x: erased.x / mapWidth,
+          y: erased.y / mapHeight,
+          status: erased.s,
+          kind: erased.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
+        if (error) {
+          failure = error;
+          break;
+        }
+        touchedMarks.add(erased.id);
+
+        const linkedLot = inverse.snapshot.lots.find((row) => row.mark_id === erased.id);
+        if (linkedLot) {
+          try {
+            upsertLotRow(await saveLot({
+              projectId: currentProjectId,
+              markId: erased.id,
+              phase: linkedLot.phase,
+              block: linkedLot.block,
+              lot: linkedLot.lot,
+              status: linkedLot.status,
+            }));
+          } catch (error) {
+            failure = error instanceof Error ? error : new Error(String(error));
+            break;
+          }
+        }
+      }
+      if (failure) break;
     } else if (inverse.kind === 'status') {
       const mark = marks.find((candidate) => candidate.id === inverse.markId);
       if (!mark || mark.s !== inverse.newStatus) {
         failure = new Error('This mark changed since your edit. Refresh before undoing.');
         break;
       }
-      const linkedLot = lotRows.find((row) => row.mark_id === inverse.markId);
+      const linkedLot = mark.t === 'f'
+        ? lotRows.find((row) => row.mark_id === inverse.markId)
+        : undefined;
       if (linkedLot) {
         try {
           upsertLotRow(await undoLotStatus(linkedLot.id, inverse.previousStatus));
@@ -880,7 +935,16 @@ async function undo(): Promise<void> {
       return;
     }
   }
+  if (action.kind === 'clear') {
+    try {
+      removeClearRecoverySnapshot(localStorage, action.snapshot.scope);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(toastElement, `Map restored, but the recovery snapshot could not be removed: ${message}`);
+    }
+  }
   saveState();
+  updateClearRecoveryButton();
   refreshStatusUi();
 }
 
@@ -905,11 +969,19 @@ function closeLegendEditor(): void {
     legendBackdrop.classList.add('hidden');
     legendBackdrop.setAttribute('aria-hidden', 'true');
   }
+  legendEscapeDismissal?.deactivate();
   legendEditorMode = 'add';
   legendEditorKey = null;
   if (legendNameInput) legendNameInput.value = '';
   if (legendColorInput) legendColorInput.value = '#1f9d55';
 }
+
+const legendEscapeDismissal = legendBackdrop
+  ? registerEscapeDismissable(legendBackdrop, () => {
+      closeLegendEditor();
+      return true;
+    })
+  : null;
 
 function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void {
   if (mode === 'add' && Object.keys(statuses).length >= MAX_NUMBERED_STATUSES) {
@@ -923,6 +995,7 @@ function openLegendEditor(mode: 'add' | 'edit', key: string | null = null): void
   if (legendBackdrop) {
     legendBackdrop.classList.remove('hidden');
     legendBackdrop.setAttribute('aria-hidden', 'false');
+    legendEscapeDismissal?.activate();
   }
 
   if (mode === 'edit' && key && statuses[key]) {
@@ -1010,9 +1083,14 @@ async function persistStatuses(): Promise<void> {
   });
 }
 
-function setMode(mode: PaintMode): void {
+async function setMode(mode: PaintMode): Promise<boolean> {
+  if (mode === 'pin' && lotPanel.isOpen()) {
+    const dismissed = await lotPanel.dismiss();
+    if (!dismissed) return false;
+  }
   currentMode = mode;
   setToolbarMode(modeButtons, currentMode, box);
+  return true;
 }
 
 /**
@@ -1075,13 +1153,6 @@ async function openMap(index: number): Promise<void> {
     currentProjectId = await resolveProjectId(index);
     lotTableButton.style.display =
       currentUser && currentProjectId ? 'flex' : 'none';
-    if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
-      setDuplicateCleanupAdmin(
-        duplicateCleanupBackdrop,
-        duplicateCleanupBtn,
-        currentUserRole === 'admin' && Boolean(currentProjectId)
-      );
-    }
     if (currentProjectId) {
       const { position, error } = await loadProjectLegendPosition(currentProjectId);
       if (position) legendPos = position;
@@ -1147,6 +1218,7 @@ async function openMap(index: number): Promise<void> {
     loadingIndicator.style.display = 'none';
     fitAndCenterMap();
     renderAll();
+    updateClearRecoveryButton();
   } catch (err) {
     console.error('Failed to load map image:', err);
     loadingIndicator.textContent = 'Failed to load map.';
@@ -1165,13 +1237,6 @@ async function openProject(proj: Project): Promise<void> {
   lotRows = [];
   lotTable.setRows(lotRows);
   lotTableButton.style.display = currentUser ? 'flex' : 'none';
-  if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
-    setDuplicateCleanupAdmin(
-      duplicateCleanupBackdrop,
-      duplicateCleanupBtn,
-      currentUserRole === 'admin'
-    );
-  }
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -1217,6 +1282,7 @@ async function openProject(proj: Project): Promise<void> {
     loadingIndicator.style.display = 'none';
     fitAndCenterMap();
     renderAll();
+    updateClearRecoveryButton();
   } catch (err) {
     console.error('Failed to load project map:', err);
     const message = err instanceof Error ? err.message : 'Failed to load map.';
@@ -1312,10 +1378,12 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
       : undefined;
     if (shouldPersist && result.updatedMark && previousMark?.s !== result.updatedMark.s) {
       if (!result.updatedMark.id || !currentUser || !currentProjectId) {
-        showToast(toastElement, 'Cannot update a fill without its saved mark ID.');
+        showToast(toastElement, 'Cannot update a map mark without its saved mark ID.');
         return;
       }
-      const linkedLot = lotRows.find((row) => row.mark_id === result.updatedMark?.id);
+      const linkedLot = result.updatedMark.t === 'f'
+        ? lotRows.find((row) => row.mark_id === result.updatedMark?.id)
+        : undefined;
       if (linkedLot) {
         try {
           const updatedLot = await saveLot({
@@ -1466,73 +1534,6 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
       );
     }
   }
-}
-
-if (
-  duplicateCleanupBtn &&
-  duplicateCleanupBackdrop &&
-  duplicateCleanupStatus &&
-  duplicateCleanupTableBody &&
-  duplicateCleanupEmpty &&
-  duplicateCleanupConfirm &&
-  duplicateCleanupClose
-) {
-  initDuplicateCleanup(
-    {
-      button: duplicateCleanupBtn,
-      backdrop: duplicateCleanupBackdrop,
-      status: duplicateCleanupStatus,
-      tableBody: duplicateCleanupTableBody,
-      emptyMessage: duplicateCleanupEmpty,
-      confirmButton: duplicateCleanupConfirm,
-      closeButtons: [duplicateCleanupClose],
-    },
-    async () => {
-      if (currentUserRole !== 'admin' || !currentProjectId) {
-        throw new Error('Administrator access and an active project are required.');
-      }
-      const { data, error } = await loadMarks(currentProjectId);
-      if (error || !data) {
-        throw error || new Error('Supabase returned no mark data.');
-      }
-      return data
-        .map(markFromRow)
-        .filter((mark): mark is Mark => mark !== null && mark.t === 'f');
-    },
-    async (markIds) => {
-      if (currentUserRole !== 'admin' || !currentUser || !currentProjectId) {
-        return { deleted: 0, error: new Error('Administrator access is required.') };
-      }
-
-      let deleted = 0;
-      for (const markId of markIds) {
-        const { error } = await deleteMark(markId);
-        if (error) {
-          let cleanupError = error;
-          if (deleted > 0) {
-            try {
-              await reloadMarksFromSupabase(currentProjectId);
-            } catch (syncError) {
-              const syncMessage =
-                syncError instanceof Error ? syncError.message : String(syncError);
-              cleanupError = new Error(`${error.message}; refreshing marks also failed: ${syncMessage}`);
-            }
-          }
-          return { deleted, error: cleanupError };
-        }
-        deleted += 1;
-      }
-
-      try {
-        await reloadMarksFromSupabase(currentProjectId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { deleted, error: new Error(`Deleted marks, but could not refresh the map: ${message}`) };
-      }
-      showToast(toastElement, `Removed ${deleted} duplicate fill mark${deleted === 1 ? '' : 's'}.`);
-      return { deleted, error: null };
-    }
-  );
 }
 
 // Attach map click handler to stage, verifying the click is within the rendered map box
@@ -1770,11 +1771,123 @@ stage.addEventListener(
 initModeButtons(
   modeButtons,
   currentMode,
-  (newMode) => {
-    currentMode = newMode;
-  },
+  setMode,
   box
 );
+
+async function restoreLastClear(): Promise<void> {
+  if (currentUserRole !== 'admin' && currentUserRole !== 'editor') return;
+  if (!mapWidth || !mapHeight) {
+    showToast(toastElement, 'Wait for the map to finish loading before restoring it.');
+    return;
+  }
+
+  let snapshot: ClearRecoverySnapshot | null;
+  try {
+    snapshot = loadClearRecoverySnapshot(localStorage, getClearRecoveryScope());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(toastElement, `Could not read the clear recovery snapshot: ${message}`);
+    return;
+  }
+  if (!snapshot) {
+    updateClearRecoveryButton();
+    showToast(toastElement, 'There is no saved clear to restore for this project.');
+    return;
+  }
+
+  const restoredMarks: Mark[] = [];
+  try {
+    if (currentUser && currentProjectId) {
+      for (const mark of snapshot.marks) {
+        if (!mark.id) {
+          throw new Error('A saved map mark has no ID and cannot be restored to the project.');
+        }
+        const { data, error } = await saveMark({
+          id: mark.id,
+          project_id: currentProjectId,
+          x: mark.x / mapWidth,
+          y: mark.y / mapHeight,
+          status: mark.s,
+          kind: mark.t === 'p' ? 'pin' : 'fill',
+          updated_by: currentUser.id,
+        });
+        if (error || !data) {
+          throw error || new Error('Saving a restored map mark returned no row.');
+        }
+        restoredMarks.push({
+          ...mark,
+          updated_at: data.updated_at,
+          updated_by: data.updated_by,
+        });
+      }
+
+      for (const row of snapshot.lots) {
+        if (!row.mark_id) continue;
+        upsertLotRow(await saveLot({
+          projectId: currentProjectId,
+          markId: row.mark_id,
+          phase: row.phase,
+          block: row.block,
+          lot: row.lot,
+          status: row.status,
+        }));
+      }
+
+      await reloadMarksFromSupabase(currentProjectId);
+      lotRows = await listLots(currentProjectId);
+      lotTable.setRows(lotRows);
+    } else {
+      restoredMarks.push(...snapshot.marks);
+      const restoredIds = new Set(restoredMarks.map((mark) => mark.id).filter(Boolean));
+      marks = marks.filter((mark) => {
+        if (mark.id) return !restoredIds.has(mark.id);
+        return !restoredMarks.some(
+          (restored) =>
+            !restored.id &&
+            restored.t === mark.t &&
+            restored.x === mark.x &&
+            restored.y === mark.y &&
+            restored.s === mark.s
+        );
+      });
+      marks.push(...restoredMarks);
+    }
+
+    removeClearRecoverySnapshot(localStorage, snapshot.scope);
+    history = [];
+    saveState();
+    renderAll();
+    updateClearRecoveryButton();
+    showToast(toastElement, `Restored ${snapshot.marks.length} map marks.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (currentUser && currentProjectId) {
+      try {
+        await reloadMarksFromSupabase(currentProjectId);
+        lotRows = await listLots(currentProjectId);
+        lotTable.setRows(lotRows);
+      } catch (refreshError) {
+        const refreshMessage =
+          refreshError instanceof Error ? refreshError.message : String(refreshError);
+        showToast(
+          toastElement,
+          `Restore was incomplete: ${message}. Refresh also failed: ${refreshMessage}. The recovery snapshot was kept for another attempt.`
+        );
+        return;
+      }
+    }
+    showToast(
+      toastElement,
+      `Restore was incomplete: ${message}. The recovery snapshot was kept for another attempt.`
+    );
+  }
+}
+
+restoreClearButton.addEventListener('click', () => {
+  restoreClearButton.closest('details')?.removeAttribute('open');
+  void restoreLastClear();
+});
 
 initActionButtons(
   {
@@ -1797,11 +1910,54 @@ initActionButtons(
         return;
       }
       if (marks.length > 0) {
-        // If authenticated and project_id exists, delete all marks from Supabase
+        try {
+          if (loadClearRecoverySnapshot(localStorage, getClearRecoveryScope())) {
+            showToast(
+              toastElement,
+              'Restore the previous clear before clearing again so its recovery snapshot is not replaced.'
+            );
+            return;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          showToast(toastElement, `Cannot safely clear the map: ${message}`);
+          return;
+        }
+
+        if (!window.confirm(
+          `Clear all ${marks.length} map marks? A recovery copy will be saved, and Lot Register rows will remain.`
+        )) {
+          return;
+        }
+
+        const marksBeforeClear = marks.map((mark) => ({
+          ...mark,
+          sp: mark.sp?.map((span) => [...span] as [number, number, number]),
+        }));
+        const markIds = new Set(
+          marksBeforeClear.map((mark) => mark.id).filter((id): id is string => Boolean(id))
+        );
+        const lotsBeforeClear = lotRows
+          .filter((row) => row.mark_id && markIds.has(row.mark_id))
+          .map((row) => ({ ...row }));
+        const snapshot: ClearRecoverySnapshot = {
+          scope: getClearRecoveryScope(),
+          clearedAt: new Date().toISOString(),
+          marks: marksBeforeClear,
+          lots: lotsBeforeClear,
+        };
+        try {
+          saveClearRecoverySnapshot(localStorage, snapshot);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          showToast(toastElement, `Could not save a recovery copy; the map was not cleared: ${message}`);
+          return;
+        }
+
         if (currentUser && currentProjectId) {
-          const marksBeforeClear = marks;
           const { data, error } = await clearAllMarks(currentProjectId);
           if (error) {
+            updateClearRecoveryButton();
             showToast(toastElement, `Could not clear map: ${error.message}`);
             return;
           }
@@ -1812,10 +1968,12 @@ initActionButtons(
             } catch (syncError) {
               const message =
                 syncError instanceof Error ? syncError.message : String(syncError);
+              updateClearRecoveryButton();
               showToast(toastElement, `Could not verify clear operation: ${message}`);
               return;
             }
             if (marks.length) {
+              updateClearRecoveryButton();
               showToast(toastElement, 'Some marks could not be cleared; the map was refreshed from Supabase.');
               return;
             }
@@ -1825,9 +1983,11 @@ initActionButtons(
 
         history = [];
         marks = [];
+        recordUndo({ kind: 'clear', snapshot });
         refreshStatusUi();
         saveState();
-        showToast(toastElement, 'Map cleared. Clear cannot be undone safely; undo history was cleared.');
+        updateClearRecoveryButton();
+        showActionToast(toastElement, 'Map cleared. A recovery copy is available.', 'Undo', async () => undo(), 10000);
       }
     },
     onZoomOut: () => setZoom(0.8),
@@ -1909,7 +2069,7 @@ initKeyboardShortcuts({
   },
   onSetMode: (mode) => {
     if (currentUserRole === 'admin' || currentUserRole === 'editor') {
-      setMode(mode);
+      void setMode(mode);
     }
   },
 });
@@ -2072,11 +2232,6 @@ if (authScreen && appRoot && authForm && authEmail && authPassword && authError)
         lotRows = [];
         lotTableButton.style.display = 'none';
         currentProjectId = null;
-        if (duplicateCleanupBtn && duplicateCleanupBackdrop) {
-          setDuplicateCleanupAdmin(duplicateCleanupBackdrop, duplicateCleanupBtn, false);
-          duplicateCleanupBackdrop.style.display = 'none';
-          duplicateCleanupBackdrop.setAttribute('aria-hidden', 'true');
-        }
         showAuthScreen({ authScreen, appRoot, disabledScreen });
 
         // Unsubscribe from real-time and clear map canvas memory

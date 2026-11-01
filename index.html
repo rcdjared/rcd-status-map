@@ -81,12 +81,6 @@
             <path d="M4 6h13M8 3v17M12 10h4M12 14h4"></path>
           </svg>Lots
         </button>
-        <button type="button" id="btn-cleanup-duplicates" class="nav-tab rail-action admin-only" style="display: none;" title="Find duplicate fills">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M8 8h11v13H8zM5 16H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"></path>
-            <path d="M11 12h5M11 16h5"></path>
-          </svg>Duplicates
-        </button>
         <button type="button" id="btn-upload-map" class="nav-tab rail-action admin-only" title="Upload new map (PDF, PNG, JPG)" style="display: none;">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -141,7 +135,7 @@
               <button data-m="fill" class="on" title="Paint lot (F)" aria-label="Paint lot">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"></path><path d="m12 6 6 6"></path></svg>
               </button>
-              <button data-m="pin" title="Pin (P)" aria-label="Place pin">
+              <button data-m="pin" title="Temporary status pin: uses the selected status color, is shared until erased, and never changes Lot Register (P)" aria-label="Place temporary status pin; does not change Lot Register">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
               </button>
               <button data-m="erase" title="Erase (E)" aria-label="Erase marks">
@@ -154,9 +148,6 @@
             <div class="g" id="action-tools" role="group" aria-label="Map actions">
               <button id="un" title="Undo (Ctrl+Z)" aria-label="Undo">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10a6 6 0 0 1 0 12h-2"></path></svg>
-              </button>
-              <button id="cl" title="Clear all" aria-label="Clear all marks">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 14h12l1-14M9 7V4h6v3"></path></svg>
               </button>
               <button id="zo" title="Zoom out" aria-label="Zoom out">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5M7.5 10.5h6"></path></svg>
@@ -181,6 +172,15 @@
                 </div>
               </details>
             </div>
+            <details class="clear-menu">
+              <summary title="Destructive map actions" aria-label="Destructive map actions">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 14h12l1-14M9 7V4h6v3"></path></svg>
+              </summary>
+              <div class="clear-menu-panel">
+                <button type="button" id="cl" class="clear-map-action">Clear map…</button>
+                <button type="button" id="restore-clear" hidden>Restore last clear</button>
+              </div>
+            </details>
           </div>
         </div>
       </header>
@@ -214,36 +214,6 @@
         <button type="button" id="legend-save-btn" class="btn-primary">Save</button>
       </div>
     </div>
-  </div>
-
-  <div id="duplicate-cleanup-backdrop" class="modal-overlay" style="display:none;" aria-hidden="true" data-admin="false">
-    <section class="modal-content modal-content-lg duplicate-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-cleanup-title">
-      <header class="modal-header">
-        <h2 id="duplicate-cleanup-title">Duplicate fill cleanup</h2>
-        <p class="modal-sub">A duplicate is a second saved fill covering the exact same map region. This can happen after repeated painting or duplicate imports. Review the dry-run results before deleting; the newest fill in each group is kept.</p>
-      </header>
-      <p id="duplicate-cleanup-status" role="status"></p>
-      <p id="duplicate-cleanup-empty" style="display:none;">No duplicate fill groups found.</p>
-      <div class="duplicate-cleanup-table-wrap">
-        <table class="history-table duplicate-cleanup-table">
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Mark ID</th>
-              <th>Status</th>
-              <th>Updated</th>
-              <th>Updated by</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="duplicate-cleanup-table-body"></tbody>
-        </table>
-      </div>
-      <div class="modal-actions">
-        <button type="button" id="duplicate-cleanup-close" class="btn btn-secondary">Close</button>
-        <button type="button" id="duplicate-cleanup-confirm" class="btn btn-danger" disabled>Confirm and delete duplicates</button>
-      </div>
-    </section>
   </div>
 
   <div id="t"></div>

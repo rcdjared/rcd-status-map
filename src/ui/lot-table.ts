@@ -1,5 +1,6 @@
 import type { LotRegisterRow } from '../api/supabase';
 import type { StatusMap } from '../map/painting';
+import { registerEscapeDismissable } from './escape-dismiss.ts';
 
 type SortColumn = 'phase' | 'block' | 'lot' | 'status';
 type FilterColumn = 'phase' | 'block' | 'status';
@@ -44,7 +45,12 @@ export function initLotTable(
           <h2 id="lot-table-title">Lot register</h2>
           <p class="lot-table-count" aria-live="polite"></p>
         </div>
-        <button type="button" class="lot-table-close" aria-label="Close lot register">×</button>
+        <button
+          type="button"
+          class="lot-table-close"
+          title="Close lot register"
+          aria-label="Close lot register"
+        >Close</button>
       </header>
       <div class="lot-table-filters">
         <label>Phase <select data-filter="phase"><option value="">All phases</option></select></label>
@@ -67,12 +73,19 @@ export function initLotTable(
         </table>
         <p class="lot-table-empty" hidden>No lots match these filters.</p>
       </div>
+      <footer class="lot-table-footer">
+        <button type="button" class="lot-table-close">Close table</button>
+      </footer>
     </section>`
   );
 
   const panel = container.querySelector<HTMLElement>('.lot-table-panel')!;
   panel.id = 'lot-table-panel';
-  const closeButton = panel.querySelector<HTMLButtonElement>('.lot-table-close')!;
+  const escapeDismissal = registerEscapeDismissable(panel, () => {
+    close();
+    return true;
+  });
+  const closeButtons = panel.querySelectorAll<HTMLButtonElement>('.lot-table-close');
   const count = panel.querySelector<HTMLElement>('.lot-table-count')!;
   const tbody = panel.querySelector<HTMLTableSectionElement>('tbody')!;
   const empty = panel.querySelector<HTMLElement>('.lot-table-empty')!;
@@ -370,16 +383,17 @@ export function initLotTable(
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(render, 100);
   });
-  closeButton.addEventListener('click', close);
+  closeButtons.forEach((button) => button.addEventListener('click', close));
   panel.addEventListener('pointerdown', (event) => event.stopPropagation());
   panel.addEventListener('click', (event) => event.stopPropagation());
   panel.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') close();
+    if (event.key === 'Escape') event.stopPropagation();
   });
 
   function close(): void {
     const wasOpen = !panel.hidden;
     panel.hidden = true;
+    escapeDismissal.deactivate();
     toggleButton.setAttribute('aria-expanded', 'false');
     if (wasOpen && toggleButton.getClientRects().length > 0) toggleButton.focus();
   }
@@ -387,6 +401,8 @@ export function initLotTable(
   toggleButton.setAttribute('aria-expanded', 'false');
   toggleButton.addEventListener('click', () => {
     panel.hidden = !panel.hidden;
+    if (panel.hidden) escapeDismissal.deactivate();
+    else escapeDismissal.activate();
     toggleButton.setAttribute('aria-expanded', String(!panel.hidden));
     if (!panel.hidden) {
       updateFilters();

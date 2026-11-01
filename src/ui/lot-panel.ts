@@ -4,6 +4,7 @@ import {
 } from '../api/lotRegister';
 import type { LotRegisterRow } from '../api/supabase';
 import type { StatusMap } from '../map/painting';
+import { registerEscapeDismissable } from './escape-dismiss.ts';
 
 export interface LotPanelContext {
   projectId: string;
@@ -27,7 +28,7 @@ export interface LotPanelCallbacks {
 
 export interface LotPanel {
   open(context: LotPanelContext, statuses: StatusMap): void;
-  dismiss(): Promise<void>;
+  dismiss(): Promise<boolean>;
   close(): void;
   hide(): void;
   isOpen(): boolean;
@@ -68,6 +69,7 @@ export function initLotPanel(
   );
 
   const panel = container.querySelector<HTMLElement>('.lot-panel')!;
+  const escapeDismissal = registerEscapeDismissable(panel, () => dismiss());
   const form = panel.querySelector<HTMLFormElement>('form')!;
   const phaseInput = panel.querySelector<HTMLInputElement>('#lot-phase')!;
   const blockInput = panel.querySelector<HTMLInputElement>('#lot-block')!;
@@ -130,10 +132,12 @@ export function initLotPanel(
   const close = (): void => {
     panel.hidden = true;
     context = null;
+    escapeDismissal.deactivate();
   };
 
-  const dismiss = async (): Promise<void> => {
-    if (!context || saving || dismissing) return;
+  const dismiss = async (): Promise<boolean> => {
+    if (!context) return panel.hasAttribute('hidden');
+    if (saving || dismissing) return false;
     dismissing = true;
     closeButton.disabled = true;
     cancelButton.disabled = true;
@@ -143,9 +147,11 @@ export function initLotPanel(
         await callbacks.onCancel(context);
       }
       close();
+      return true;
     } catch (error) {
       warning.textContent = error instanceof Error ? error.message : String(error);
       warning.hidden = false;
+      return false;
     } finally {
       dismissing = false;
       closeButton.disabled = false;
@@ -193,9 +199,8 @@ export function initLotPanel(
       message.textContent = result.linkedExisting
         ? 'Linked the existing unmapped register row to this lot.'
         : 'Lot saved.';
-      lotInput.value = '';
       clearDuplicate();
-      lotInput.focus();
+      close();
     } catch (error) {
       if (error instanceof DuplicatePblError) {
         duplicateKey = pblKey;
@@ -227,6 +232,7 @@ export function initLotPanel(
       showExisting.hidden = true;
       message.textContent = '';
       panel.hidden = false;
+      escapeDismissal.activate();
       saveButton.disabled = false;
       closeButton.disabled = false;
       cancelButton.disabled = false;

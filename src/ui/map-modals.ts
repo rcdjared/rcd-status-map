@@ -1,6 +1,7 @@
 import { processMapUploadFile, isSupportedMapFormat, isPdfFile, type ProcessedMapFile } from '../map/pdf-loader';
 import { uploadMapImage, createProject, deleteProject } from '../api/projects';
 import type { Project } from '../api/supabase';
+import { registerEscapeDismissable } from './escape-dismiss.ts';
 
 export interface MapModalCallbacks {
   onProjectCreated: (project: Project) => Promise<void>;
@@ -226,6 +227,7 @@ export function initMapModals(callbacks: MapModalCallbacks) {
 
   function openUploadModal(): void {
     uploadOverlay.style.display = 'flex';
+    uploadEscapeDismissal.activate();
     uploadNameInput.value = '';
     setSelectedFile(null);
     setUploadLoading(false);
@@ -235,6 +237,7 @@ export function initMapModals(callbacks: MapModalCallbacks) {
 
   function closeUploadModal(): void {
     uploadOverlay.style.display = 'none';
+    uploadEscapeDismissal.deactivate();
     setUploadLoading(false);
   }
 
@@ -244,12 +247,29 @@ export function initMapModals(callbacks: MapModalCallbacks) {
     if (deleteErrorBox) deleteErrorBox.style.display = 'none';
     if (deleteConfirmBtn) deleteConfirmBtn.disabled = false;
     deleteOverlay.style.display = 'flex';
+    deleteEscapeDismissal.activate();
   }
 
   function closeDeleteModal(): void {
     deleteOverlay.style.display = 'none';
+    deleteEscapeDismissal.deactivate();
     targetDeleteProject = null;
   }
+
+  const uploadEscapeDismissal = registerEscapeDismissable(
+    uploadOverlay,
+    () => {
+      closeUploadModal();
+      return true;
+    }
+  );
+  const deleteEscapeDismissal = registerEscapeDismissable(
+    deleteOverlay,
+    () => {
+      closeDeleteModal();
+      return true;
+    }
+  );
 
   // File Dropzone handlers
   dropzone.addEventListener('click', () => {
@@ -382,13 +402,6 @@ export function initMapModals(callbacks: MapModalCallbacks) {
   });
   deleteOverlay.addEventListener('click', (e) => {
     if (e.target === deleteOverlay) closeDeleteModal();
-  });
-
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (uploadOverlay.style.display === 'flex') closeUploadModal();
-      if (deleteOverlay.style.display === 'flex') closeDeleteModal();
-    }
   });
 
   return {

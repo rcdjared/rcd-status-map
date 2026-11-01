@@ -220,11 +220,28 @@ input:focus-visible,
 }
 
 .lot-table-close {
-  border: 0;
-  background: transparent;
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--sf);
   color: var(--tx);
-  font-size: 24px;
-  line-height: 1;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.lot-table-close:hover {
+  border-color: var(--brand-green);
+  color: var(--brand-green);
+}
+
+.lot-table-close:focus-visible {
+  outline: 2px solid var(--brand-green);
+  outline-offset: 2px;
 }
 
 .lot-table-filters {
@@ -256,10 +273,20 @@ input:focus-visible,
 }
 
 .lot-table-scroll {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--bd);
   border-radius: 8px;
+}
+
+.lot-table-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bd);
 }
 
 .lot-table-scroll table {
@@ -593,12 +620,22 @@ input:focus-visible,
   top: 0;
   left: calc(100% + 10px);
   z-index: 35;
-  width: min(330px, calc(100vw - var(--rail) - 24px));
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: min(330px, calc(100vw - var(--rail) - 24px));
   padding: 12px;
   background: var(--sf);
   border: 1px solid var(--bd);
   border-radius: 12px;
   box-shadow: var(--sh);
+}
+
+.status-manager-panel #chips {
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  padding-top: 0;
 }
 
 .status-manager-panel #btn-add-status {
@@ -611,8 +648,17 @@ input:focus-visible,
 }
 
 .status-manager-panel .chip {
+  box-sizing: border-box;
+  align-self: flex-start;
+  width: 100%;
+  max-width: 100%;
   justify-content: space-between;
   cursor: default;
+}
+
+.status-manager-panel .chip > span:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .status-manager .chip {
@@ -643,7 +689,8 @@ input:focus-visible,
 }
 
 body.role-viewer .status-manager,
-body.role-viewer #btn-add-status {
+body.role-viewer #btn-add-status,
+body.role-viewer .clear-menu {
   display: none !important;
 }
 
@@ -791,10 +838,10 @@ select {
 }
 
 .export-menu-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 40;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
   min-width: 150px;
   display: grid;
   gap: 4px;
@@ -810,6 +857,80 @@ select {
   padding: 0 10px;
   text-align: left;
   white-space: nowrap;
+}
+
+.clear-menu {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--bd);
+}
+
+.clear-menu > summary {
+  width: 36px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #dc2626;
+  cursor: pointer;
+  list-style: none;
+}
+
+.clear-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.clear-menu > summary svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.clear-menu > summary:hover,
+.clear-menu[open] > summary {
+  background: var(--sf);
+}
+
+.clear-menu-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  min-width: 190px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: var(--sf);
+  box-shadow: var(--sh);
+}
+
+.clear-menu-panel button {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--tx);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.clear-menu-panel button:hover {
+  background: var(--sf2);
+}
+
+.clear-menu-panel .clear-map-action {
+  color: #dc2626;
 }
 
 .header-controls .spacer {
@@ -1270,7 +1391,8 @@ body.role-viewer .chip-add {
     right: 0;
     bottom: calc(100% + 8px);
     left: auto;
-    width: min(330px, calc(100vw - 24px));
+    width: fit-content;
+    max-width: min(330px, calc(100vw - 24px));
   }
 
   .status-manager .chip-menu-panel {

@@ -68,3 +68,24 @@ test('CSV export uses human-readable status names when a status map is available
   assert.match(csv, /"Completed"/);
   assert.doesNotMatch(csv, /"c"/);
 });
+
+test('CSV export includes a dated project summary and status descriptions', () => {
+  const csv = buildLotCsv(
+    [
+      { phase: '1', block: 'A', lot: '1', status: 'c', mark_id: 'm-1' },
+      { phase: '1', block: 'A', lot: '2', status: 'a', mark_id: null },
+    ],
+    'Balayan',
+    { c: 'Completed', a: 'Available' },
+    new Date(2026, 10, 1)
+  );
+
+  assert.match(csv, /"Export date","2026-11-01"/);
+  assert.match(csv, /"Total lots","2"/);
+  assert.match(
+    csv,
+    /"Status","Available","","1","50%","As of 2026-11-01, 1 of 2 lots in Balayan are Available \(50%\)\."/
+  );
+  assert.match(csv, /"Project","Phase","Block","Lot","Status","Mapped"/);
+  assert.match(csv, /"Balayan","1","A","1","Completed","Yes"/);
+});

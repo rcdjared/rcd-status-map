@@ -1,3 +1,5 @@
+import { buildSummaryDescription } from './templates.ts';
+
 export interface LotStatusSummaryBucket {
   status: string;
   label: string;
@@ -113,10 +115,42 @@ export function escapeCsvCell(value: unknown): string {
 export function buildLotCsv(
   rows: LotSummaryRow[],
   projectName: string,
-  statusLabels?: StatusLabelMap
+  statusLabels?: StatusLabelMap,
+  exportDate: Date = new Date()
 ): string {
+  const summary = summarizeLots(rows, statusLabels);
+  const date = [
+    exportDate.getFullYear(),
+    String(exportDate.getMonth() + 1).padStart(2, '0'),
+    String(exportDate.getDate()).padStart(2, '0'),
+  ].join('-');
+  const summaryRows = [
+    ['Summary', 'Item', 'Value', 'Count', 'Percent', 'Description'],
+    ['Summary', 'Project', projectName, '', '', ''],
+    ['Summary', 'Export date', date, '', '', ''],
+    ['Summary', 'Total lots', summary.total, '', '', ''],
+    ['Summary', 'Mapped lots', summary.mapped, '', '', ''],
+    ['Summary', 'Unmapped lots', summary.unmapped, '', '', ''],
+    ...summary.byStatus.map((entry) => [
+      'Status',
+      entry.status,
+      '',
+      entry.count,
+      `${entry.percent}%`,
+      buildSummaryDescription({
+        date,
+        project: projectName,
+        count: entry.count,
+        total: summary.total,
+        status: entry.status,
+        percent: entry.percent,
+      }).text,
+    ]),
+    ['', '', '', '', '', ''],
+  ];
   const header = ['Project', 'Phase', 'Block', 'Lot', 'Status', 'Mapped'];
   const csvRows = [
+    ...summaryRows,
     header,
     ...rows.map((row) => [
       projectName,

@@ -186,3 +186,20 @@ the v2 phase sequence.
   `import('xlsx')` so the workbook code is split out of the main bundle.
 - Added focused unit coverage for summary totals and CSV escaping; `npm test`
   and `npm run build` pass.
+
+### Phase 9 — Description templates (implementation in progress)
+
+- Added the whitelist-based template engine for lot and summary descriptions,
+  with built-in defaults and explicit warnings for unknown placeholders instead
+  of silent drops.
+- Added range collapsing for `lot_list` values so simple lists tighten to
+  compact ranges such as `1-3, 5-6, 9`.
+- CSV exports now start with a summary block showing project, local export
+  date, total/mapped/unmapped lots, and per-status description lines rendered
+  from the built-in summary template. The lot-detail header and rows follow.
+- Added unit coverage for built-in rendering, placeholder validation, and
+  range formatting; CSV summary output is also covered. Template rendering
+  remains pure and safe from code execution.
+- Remaining: custom template storage, template picker/editor controls, and
+  copy-to-clipboard action in the lot register UI and project context.
+- Suggested commit message: `feat: add description templates and CSV summary`

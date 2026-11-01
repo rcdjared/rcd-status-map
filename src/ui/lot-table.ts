@@ -15,6 +15,22 @@ export function compareNatural(left: string, right: string): number {
   return naturalCollator.compare(left, right);
 }
 
+export function formatLotHistoryValue(
+  field: string,
+  value: Json | undefined,
+  statuses: StatusMap
+): string {
+  if (value === null || value === undefined) return '—';
+  if (field === 'status' && typeof value === 'string') {
+    return statuses[value]?.n ?? value;
+  }
+  return String(value);
+}
+
+export function isVisibleHistoryField(field: string): boolean {
+  return field !== 'mark_id' && field !== 'project_id';
+}
+
 export function matchesPblSearch(
   row: Pick<LotRegisterRow, 'phase' | 'block' | 'lot'>,
   query: string
@@ -301,17 +317,14 @@ export function initLotTable(
         ? entry.new_values as Record<string, Json | undefined>
         : {};
       const fields = [...new Set([...Object.keys(oldValues), ...Object.keys(newValues)])];
+      const visibleFields = fields.filter(isVisibleHistoryField);
       const changes = document.createElement('ul');
       changes.className = 'lot-history-changes';
-      for (const field of fields) {
+      for (const field of visibleFields) {
         const change = document.createElement('li');
         const label = field.replaceAll('_', ' ');
-        const oldValue = oldValues[field] === null || oldValues[field] === undefined
-          ? '—'
-          : String(oldValues[field]);
-        const newValue = newValues[field] === null || newValues[field] === undefined
-          ? '—'
-          : String(newValues[field]);
+        const oldValue = formatLotHistoryValue(field, oldValues[field], statuses);
+        const newValue = formatLotHistoryValue(field, newValues[field], statuses);
         change.textContent = entry.action === 'INSERT'
           ? `${label}: ${newValue}`
           : entry.action === 'DELETE'

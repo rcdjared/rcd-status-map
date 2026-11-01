@@ -1,5 +1,6 @@
 import type { LotRegisterRow } from '../api/supabase';
 import type { StatusMap } from '../map/painting';
+import { summarizeLots } from '../register/summary.ts';
 import { registerEscapeDismissable } from './escape-dismiss.ts';
 
 type SortColumn = 'phase' | 'block' | 'lot' | 'status';
@@ -35,11 +36,15 @@ export interface LotTableCallbacks {
     details: Pick<LotRegisterRow, 'phase' | 'block' | 'lot'>
   ) => Promise<LotRegisterRow>;
   onDeleteRow: (row: LotRegisterRow) => Promise<void>;
+  onExportCsv: (rows: LotRegisterRow[], filtered: boolean) => void;
+  onExportXlsx: (rows: LotRegisterRow[], filtered: boolean) => void;
   onError: (message: string) => void;
 }
 
 export interface LotTable {
   setRows(rows: LotRegisterRow[]): void;
+  getRows(): LotRegisterRow[];
+  getVisibleRows(): LotRegisterRow[];
   setStatuses(statuses: StatusMap): void;
   setCanEdit(canEdit: boolean): void;
   close(): void;
@@ -54,9 +59,25 @@ export function initLotTable(
     'beforeend',
     `<section class="lot-table-panel" aria-labelledby="lot-table-title" hidden>
       <header class="lot-table-header">
-        <h2 id="lot-table-title">Lot register</h2>
-        <p class="lot-table-count" aria-live="polite"></p>
+        <div class="lot-table-header-main">
+          <h2 id="lot-table-title">Lot register</h2>
+          <p class="lot-table-count" aria-live="polite"></p>
+        </div>
       </header>
+      <div class="lot-table-summary" aria-live="polite">
+        <div class="lot-table-summary-card">
+          <span class="lot-table-summary-label">Total</span>
+          <strong data-summary="total">0</strong>
+        </div>
+        <div class="lot-table-summary-card">
+          <span class="lot-table-summary-label">Mapped</span>
+          <strong data-summary="mapped">0</strong>
+        </div>
+        <div class="lot-table-summary-card">
+          <span class="lot-table-summary-label">Unmapped</span>
+          <strong data-summary="unmapped">0</strong>
+        </div>
+      </div>
       <div class="lot-table-filters">
         <label>Phase <select data-filter="phase"><option value="">All phases</option></select></label>
         <label>Block <select data-filter="block"><option value="">All blocks</option></select></label>
@@ -79,8 +100,17 @@ export function initLotTable(
         <p class="lot-table-empty" hidden>No lots match these filters.</p>
       </div>
       <footer class="lot-table-footer">
+        <button type="button" class="lot-table-export-trigger" popovertarget="lot-table-export-options">
+          Export
+        </button>
         <button type="button" class="lot-table-close">Close table</button>
       </footer>
+      <div id="lot-table-export-options" class="lot-table-export-panel" popover="auto">
+        <button type="button" data-export="csv-filtered">Current CSV</button>
+        <button type="button" data-export="csv-all">All CSV</button>
+        <button type="button" data-export="xlsx-filtered">Current XLSX</button>
+        <button type="button" data-export="xlsx-all">All XLSX</button>
+      </div>
     </section>`
   );
 
@@ -91,7 +121,12 @@ export function initLotTable(
     return true;
   });
   const closeButton = panel.querySelector<HTMLButtonElement>('.lot-table-close')!;
+  const exportTrigger = panel.querySelector<HTMLButtonElement>('.lot-table-export-trigger')!;
+  const exportPopover = panel.querySelector<HTMLDivElement>('#lot-table-export-options')!;
   const count = panel.querySelector<HTMLElement>('.lot-table-count')!;
+  const summaryTotal = panel.querySelector<HTMLElement>('[data-summary="total"]')!;
+  const summaryMapped = panel.querySelector<HTMLElement>('[data-summary="mapped"]')!;
+  const summaryUnmapped = panel.querySelector<HTMLElement>('[data-summary="unmapped"]')!;
   const tbody = panel.querySelector<HTMLTableSectionElement>('tbody')!;
   const empty = panel.querySelector<HTMLElement>('.lot-table-empty')!;
   const search = panel.querySelector<HTMLInputElement>('input[type="search"]')!;
@@ -175,7 +210,11 @@ export function initLotTable(
     }
 
     const visible = filteredRows();
+    const summary = summarizeLots(visible);
     count.textContent = `${visible.length.toLocaleString()} of ${rows.length.toLocaleString()} lots`;
+    summaryTotal.textContent = summary.total.toLocaleString();
+    summaryMapped.textContent = summary.mapped.toLocaleString();
+    summaryUnmapped.textContent = summary.unmapped.toLocaleString();
     empty.hidden = visible.length > 0;
     tbody.replaceChildren();
 
@@ -377,6 +416,41 @@ export function initLotTable(
     });
   }
 
+  const positionExportPopover = (): void => {
+    if (!exportPopover.matches(':popover-open')) return;
+
+    const triggerRect = exportTrigger.getBoundingClientRect();
+    const popoverRect = exportPopover.getBoundingClientRect();
+    const left = Math.max(
+      8,
+      Math.min(triggerRect.right - popoverRect.width, window.innerWidth - popoverRect.width - 8)
+    );
+    const top =
+      triggerRect.top >= popoverRect.height + 8
+        ? triggerRect.top - popoverRect.height - 8
+        : Math.min(triggerRect.bottom + 8, window.innerHeight - popoverRect.height - 8);
+
+    exportPopover.style.left = `${left}px`;
+    exportPopover.style.top = `${Math.max(8, top)}px`;
+  };
+
+  exportPopover.addEventListener('toggle', positionExportPopover);
+  window.addEventListener('resize', positionExportPopover);
+  window.addEventListener('scroll', positionExportPopover, true);
+
+  for (const exportButton of panel.querySelectorAll<HTMLButtonElement>('[data-export]')) {
+    exportButton.addEventListener('click', () => {
+      const mode = exportButton.dataset.export ?? 'csv-filtered';
+      const filtered = mode.includes('filtered');
+      if (mode.startsWith('csv')) {
+        callbacks.onExportCsv(filtered ? filteredRows() : rows, filtered);
+      } else {
+        callbacks.onExportXlsx(filtered ? filteredRows() : rows, filtered);
+      }
+      exportPopover.hidePopover();
+    });
+  }
+
   search.addEventListener('input', () => {
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(render, 100);
@@ -414,6 +488,12 @@ export function initLotTable(
       rows = [...nextRows];
       updateFilters();
       render();
+    },
+    getRows() {
+      return [...rows];
+    },
+    getVisibleRows() {
+      return filteredRows();
     },
     setStatuses(nextStatuses) {
       statuses = nextStatuses;

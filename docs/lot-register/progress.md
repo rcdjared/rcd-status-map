@@ -18,12 +18,9 @@ the v2 phase sequence.
 | 7 | Table view | n/a | n/a | [ ] |
 | 8 | Summary and export | n/a | n/a | [ ] |
 | 9 | Description templates | [ ] | [ ] | [ ] |
-| 10 | Speed tools | [ ] | [ ] | [ ] |
-| 11 | Unlabeled and unmapped indicator | n/a | n/a | [ ] |
-| 12 | PBL map labels | n/a | n/a | [ ] |
-| 13 | Register history and retention | [ ] | [ ] | [ ] |
-| 14 | CSV import | [ ] | [ ] | [ ] |
-| 15 | Docs and release | n/a | n/a | [ ] |
+| 10 | Register history and retention | [ ] | [ ] | [ ] |
+| 11 | CSV import | [ ] | [ ] | [ ] |
+| 12 | Docs and release | n/a | n/a | [ ] |
 
 ## Decisions
 
@@ -31,6 +28,14 @@ the v2 phase sequence.
 - After each substantial change, provide a suggested commit message.
 - Do not import production data into dev; use seeded projects and test data.
   Keep production exports as backups.
+
+## Roadmap revision — 2026-11-01
+
+- Phase 7 remains in progress; Phase 8 (Summary and export) is next.
+- Reporting remains Phases 8–9. Audit and release are now Phases 10–12:
+  History, CSV import, and Docs/tests/release.
+- Power features (speed tools, unlabeled/unmapped indicators, and PBL map
+  labels) are deferred until after Phase 12 and are not release prerequisites.
 
 ## Execution log
 
@@ -170,3 +175,14 @@ the v2 phase sequence.
   inspection reached the sign-in screen; authenticated table actions and the
   signed-in header still need manual verification. Two-browser realtime and
   project-switch checks remain pending.
+
+### Phase 8 — Summary and export (implemented locally)
+
+- Added live lot summary cards for visible rows, including totals, mapped, and
+  unmapped counts.
+- Added CSV export with UTF-8 BOM and formula-injection neutralization for cells
+  beginning with `=`, `+`, `-`, or `@`.
+- Added XLSX export with `Lots` and `Summary` worksheets through a dynamic
+  `import('xlsx')` so the workbook code is split out of the main bundle.
+- Added focused unit coverage for summary totals and CSV escaping; `npm test`
+  and `npm run build` pass.

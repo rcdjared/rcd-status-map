@@ -56,12 +56,12 @@ Painting a lot today stores only a **status color**. The Lot Register adds a **t
 | | 7 | Table view with realtime | No |
 | **C. Reporting** | 8 | Summary and CSV/XLSX export | No |
 | | 9 | Description templates | Yes |
-| **D. Power features** | 10 | Speed tools: auto-increment, bulk status | Yes |
-| | 11 | Unlabeled and unmapped indicator | No |
-| | 12 | PBL labels on the map | No |
-| **E. Audit and release** | 13 | Register history, last edited by, retention | Yes |
-| | 14 | CSV import | Yes |
-| | 15 | Docs, tests, release | No |
+| **E. Audit and release** | 10 | Register history, last edited by, retention | Yes |
+| | 11 | CSV import | Yes |
+| | 12 | Docs, tests, release | No |
+
+Power features (auto-increment, bulk status, unlabeled/unmapped indicators,
+and PBL map labels) are deferred until after this release.
 
 Milestone A is useful on its own: even if you stopped there, the app would be safer than today.
 
@@ -76,16 +76,12 @@ flowchart LR
   P6 --> P7[7 Table]
   P7 --> P8[8 Summary + export]
   P8 --> P9[9 Templates]
-  P7 --> P10[10 Speed]
-  P6 --> P11[11 Unlabeled]
-  P11 --> P12[12 Map labels]
-  P7 --> P13[13 History]
-  P3 --> P13
-  P13 --> P14[14 Import]
-  P9 --> P15[15 Release]
-  P10 --> P15
-  P12 --> P15
-  P14 --> P15
+  P7 --> P10[10 History]
+  P3 --> P10
+  P10 --> P11[11 Import]
+  P9 --> P12[12 Release]
+  P10 --> P12
+  P11 --> P12
 ```
 
 ---
@@ -106,12 +102,9 @@ Copy this table into `docs/lot-register/progress.md`. Update it at the end of ea
 | 7 | Table view | n/a | n/a | [ ] |
 | 8 | Summary and export | n/a | n/a | [ ] |
 | 9 | Description templates | [ ] | [ ] | [ ] |
-| 10 | Speed tools | [ ] | [ ] | [ ] |
-| 11 | Unlabeled indicator | n/a | n/a | [ ] |
-| 12 | Map labels | n/a | n/a | [ ] |
-| 13 | History and retention | [ ] | [ ] | [ ] |
-| 14 | CSV import | [ ] | [ ] | [ ] |
-| 15 | Docs and release | n/a | n/a | [ ] |
+| 10 | History and retention | [ ] | [ ] | [ ] |
+| 11 | CSV import | [ ] | [ ] | [ ] |
+| 12 | Docs and release | n/a | n/a | [ ] |
 
 ---
 
@@ -543,8 +536,8 @@ PHASE 7: table view. Create src/ui/lot-table.ts, shown next to the form (tab or 
 
 **Done when**
 - [ ] Sorting, filtering, and search work together
-- [ ] Row click highlights the correct lot
-- [ ] Editors can correct or delete PBL entries without deleting linked map fills
+- [ ] Row click highlights the correct lot without closing the table
+- [ ] Editors can correct PBL entries; deleting a linked PBL also removes its map mark
 - [ ] Two browsers: an edit in one appears in the other
 - [ ] Switching projects does not leak subscriptions
 
@@ -606,85 +599,14 @@ PHASE 9: description templates.
 
 ---
 
-### Milestone D: Power features
-
-#### Phase 10: Speed tools
-
-**Depends on:** Phase 7 · **Branch:** `feat/lot-register-phase-10-speed` · **Database change:** yes
-
-```text
-PHASE 10: speed tools.
-
-1. Auto-increment: after a save, pre-fill Lot with the next free number in the same Phase/Block (skip taken numbers). If the saved lot is non-numeric (e.g. 12A), leave it empty. The user can override. Toggle it off per user.
-2. Bulk status change: row checkboxes, select-all for the current filter, shift-click range select, a status dropdown and Apply. Confirm with a dialog showing the count. Implement as ONE database function (all rows or none) that also updates the matching marks. Cap the batch size and explain the cap in the UI. Add verification SQL.
-```
-
-**Done when**
-- [ ] After saving lot 5 the form shows 6, or 7 if 6 exists
-- [ ] A bulk change of 50 rows is a single request and all-or-nothing
-- [ ] Map colors update for every affected lot
-
-**Learn:** batch operations, atomic updates, range selection logic.
-
----
-
-#### Phase 11: Unlabeled and unmapped indicator
-
-**Depends on:** Phase 6 · **Branch:** `feat/lot-register-phase-11-unlabeled`
-
-```text
-PHASE 11: unlabeled lots. "Unlabeled" = a fill mark with no register row. "Unmapped" = a register row with no mark.
-
-1. Table: show unlabeled lots as filterable rows marked "Unlabeled", and unmapped rows with a distinct "No map mark" indicator.
-2. Map: optional toggle drawing a subtle dashed outline or badge on unlabeled lots (reuse existing canvas layers; do not re-run flood fill unnecessarily).
-3. Summary: counts for labeled, unlabeled, and unmapped.
-4. Clicking an unlabeled row selects the lot and opens the form with that mark pre-linked.
-5. Exports exclude unlabeled lots by default, with a checkbox to include them.
-```
-
-**Done when**
-- [ ] A cancelled form leaves an unlabeled lot that appears in the table
-- [ ] Erasing a labeled mark creates an unmapped row, not data loss
-- [ ] Summary counts match what is visible
-
-**Learn:** derived state vs stored state, set difference.
-
----
-
-#### Phase 12: PBL labels on the map
-
-**Depends on:** Phase 11 · **Branch:** `feat/lot-register-phase-12-map-labels`
-
-```text
-PHASE 12: PBL labels on the map.
-
-1. Add a transparent canvas layer above the fills for labels (follow how the fill and pin canvases are created and resized).
-2. Label position: a point inside the lot (use the filled pixel span; for concave shapes make sure the point is inside the lot, not just the bounding-box center). Cache positions; recompute only when marks change.
-3. Format option: Lot only / Block-Lot / Phase-Block-Lot.
-4. Font size scales with zoom; hide labels when a lot is too small to read.
-5. Auto contrast: dark or light text depending on the fill color.
-6. Toolbar toggle, remembered per user.
-7. PNG export includes labels when the toggle is on.
-8. Must not slow pan/zoom; measure with about 500 labels and report.
-```
-
-**Done when**
-- [ ] Labels sit inside their lots, including irregular shapes
-- [ ] The PNG export matches the screen
-- [ ] Pan and zoom stay smooth with many labels
-
-**Learn:** canvas layering, centroid vs point-in-shape, device pixel ratio.
-
----
-
 ### Milestone E: Audit and release
 
-#### Phase 13: Register history, last edited by, retention
+#### Phase 10: Register history, last edited by, retention
 
-**Depends on:** Phases 3 and 7 · **Branch:** `feat/lot-register-phase-13-history` · **Database change:** yes
+**Depends on:** Phases 3 and 7 · **Branch:** `feat/lot-register-phase-10-history` · **Database change:** yes
 
 ```text
-PHASE 13: register history.
+PHASE 10: register history.
 
 1. Migration: lot_register_history (id, register_id, project_id, action, old_values jsonb, new_values jsonb, changed_by uuid, changed_at timestamptz). No FK on register_id, so history is not deleted with the row. Index on (register_id) and (changed_at).
 2. AFTER INSERT/UPDATE/DELETE trigger on lot_register writing history. changed_by comes from auth.uid() inside the database. Only write a row when OLD and NEW differ, and store only the changed fields. Bulk and import operations produce one history row per lot.
@@ -707,12 +629,12 @@ PHASE 13: register history.
 
 ---
 
-#### Phase 14: CSV import
+#### Phase 11: CSV import
 
-**Depends on:** Phase 13 · **Branch:** `feat/lot-register-phase-14-import` · **Database change:** yes
+**Depends on:** Phase 10 · **Branch:** `feat/lot-register-phase-11-import` · **Database change:** yes
 
 ```text
-PHASE 14: CSV import (editors and admins).
+PHASE 11: CSV import (editors and admins).
 
 1. Pick a CSV file; parse client-side (tell me whether you use a small library or a custom parser, and why). Cap file size and row count.
 2. Column mapping step (phase, block, lot, status) with auto-detection of common header names.
@@ -732,16 +654,16 @@ PHASE 14: CSV import (editors and admins).
 
 ---
 
-#### Phase 15: Docs, tests, release
+#### Phase 12: Docs, tests, release
 
-**Depends on:** Phases 9, 10, 12, 14 · **Branch:** `docs/lot-register-phase-15-release`
+**Depends on:** Phases 9, 10, and 11 · **Branch:** `docs/lot-register-phase-12-release`
 
 ```text
-PHASE 15: finish and document. No new features.
+PHASE 12: finish and document. No new features.
 
 1. README: feature overview, a list of screenshots/GIFs for me to add, setup (including the dev/prod env files), and a role permissions table for the register.
 2. docs/lot-register/: architecture.md (data flow), erd.md (mermaid ERD of the final schema), decisions.md (the decisions table updated to what was actually built), manual-test.md (regression script on the Balayan map, one section per phase).
-3. Unit tests for pure logic that exists (summary, natural sort, template engine, CSV escaping, auto-increment), only if a test runner is already agreed.
+3. Unit tests for pure logic that exists (summary, natural sort, template engine, CSV escaping), only if a test runner is already agreed.
 4. Run typecheck, lint, build and list any warnings.
 5. Draft CHANGELOG.md and release notes. Publish nothing.
 ```
@@ -751,6 +673,56 @@ PHASE 15: finish and document. No new features.
 - [ ] The ERD matches the real schema
 - [ ] The manual test script passes end to end on dev
 - [ ] Release tag created, e.g. `v1.1.0`
+
+---
+
+### Deferred backlog: Power features
+
+These features are outside the current release sequence. Revisit them after
+Phase 12.
+
+#### Speed tools
+
+**Depends on:** Phase 7 · **Database change:** yes
+
+- Auto-increment the next free numeric lot in the same Phase/Block after save;
+  leave non-numeric lots blank and allow the user to override or disable it.
+- Bulk status change with filtered select-all, shift-click range selection,
+  confirmation, a documented batch cap, and one all-or-nothing database
+  function that updates matching marks.
+
+**Done when:** auto-increment skips occupied numbers; a bulk update is atomic
+and map colors update for every affected lot.
+
+#### Unlabeled and unmapped indicator
+
+**Depends on:** Phase 6
+
+- Define unlabeled as a fill without a register row and unmapped as a register
+  row without a fill.
+- Show both as filterable table entries; optionally mark unlabeled fills on
+  the map without unnecessary flood-fill work.
+- Include labeled, unlabeled, and unmapped counts in the summary. Let users
+  open the PBL form from an unlabeled row.
+- Exclude unlabeled fills from exports by default, with an opt-in to include.
+
+**Done when:** cancelled forms leave visible unlabeled fills, erasing a
+labeled fill preserves an unmapped row, and summary counts match the table.
+
+#### PBL labels on the map
+
+**Depends on:** deferred unlabeled and unmapped indicator
+
+- Add a transparent label layer, cache valid interior positions, and recompute
+  only when marks change. Ensure labels for irregular lots remain inside.
+- Support Lot, Block-Lot, or Phase-Block-Lot formats; scale text with zoom and
+  hide labels that cannot be read.
+- Add automatic text contrast, a remembered toolbar toggle, and include labels
+  in PNG exports when enabled.
+- Measure pan/zoom performance with about 500 labels.
+
+**Done when:** labels remain inside lots, PNG exports match the screen, and
+pan/zoom stay smooth with many labels.
 
 ---
 
@@ -794,9 +766,9 @@ Deleting rows lets Postgres reuse space, but the reported size may not drop righ
 | Existing duplicate or orphan marks in live data | Phase 1 fix and dry-run cleanup tool, with a backup first |
 | Admin-only rules break legitimate editor actions | Phase 3 lists real editor actions first and keeps legend and status config editable |
 | Table and map status drift apart | One atomic save function (Phase 5), persistent undo (Phase 2) |
-| Wrong status chip recolors a lot | Undo toast (Phase 6), history and restore (Phase 13) |
+| Wrong status chip recolors a lot | Undo toast (Phase 6), history and restore (Phase 10) |
 | History can be forged | Triggers set identity from `auth.uid()`; the forgeable policy is dropped (Phase 3) |
 | Copilot edits outside the phase | Review the diff against scope; one phase per chat |
 | Database or storage fills up | Skip no-op history rows, 18-month retention, compress images, check sizes quarterly |
 | Free project pauses | Weekly keep-alive request |
-| Label rendering slows the map | Cache positions and measure (Phase 12) |
+| Label rendering slows the map | Cache positions and measure in the deferred PBL-label backlog |

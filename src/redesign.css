@@ -203,9 +203,15 @@ input:focus-visible,
 
 .lot-table-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+}
+
+.lot-table-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .lot-table-header h2 {
@@ -217,6 +223,63 @@ input:focus-visible,
   margin: 0;
   color: var(--mu);
   font-size: 11px;
+}
+
+.lot-table-export-trigger {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--sf);
+  color: var(--tx);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lot-table-export-trigger:hover {
+  border-color: var(--brand-green);
+  color: var(--brand-green);
+}
+
+.lot-table-export-panel {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: var(--sf);
+  box-shadow: var(--sh);
+  color: var(--tx);
+  z-index: 1000;
+}
+
+.lot-table-export-panel:not(:popover-open) {
+  display: none;
+}
+
+.lot-table-export-panel button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--tx);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lot-table-export-panel button:hover {
+  border-color: var(--brand-green);
+  color: var(--brand-green);
+  background: color-mix(in srgb, var(--brand-green) 8%, var(--sf));
 }
 
 .lot-table-close {
@@ -242,6 +305,35 @@ input:focus-visible,
 .lot-table-close:focus-visible {
   outline: 2px solid var(--brand-green);
   outline-offset: 2px;
+}
+
+.lot-table-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lot-table-summary-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+}
+
+.lot-table-summary-label {
+  color: var(--mu);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.lot-table-summary-card strong {
+  font-size: 18px;
+  line-height: 1.1;
 }
 
 .lot-table-filters {
@@ -283,6 +375,8 @@ input:focus-visible,
 .lot-table-footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   margin-top: 8px;
   padding-top: 8px;

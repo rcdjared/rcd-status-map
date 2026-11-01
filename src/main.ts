@@ -88,6 +88,7 @@ import {
   initModeButtons,
   setToolbarMode,
 } from './ui/toolbar';
+import { buildLotCsv, downloadBlob, exportLotsToXlsx } from './register/summary.ts';
 import { initLotPanel } from './ui/lot-panel';
 import { initLotTable } from './ui/lot-table';
 import { initEscapeDismissal, registerEscapeDismissable } from './ui/escape-dismiss';
@@ -248,6 +249,28 @@ function showExistingLot(rowId: string): void {
   highlightMapMark(row.mark_id);
 }
 
+function exportLotRows(rows: LotRegisterRow[], kind: 'csv' | 'xlsx', filtered: boolean): Promise<void> {
+  const projectName = currentProject?.name ?? currentProjectId ?? MAPS[currentMapIndex].id ?? 'project';
+  const safeProjectName = projectName.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'project';
+  const filenameStem = `${safeProjectName}-lots-${new Date().toISOString().slice(0, 10)}`;
+  const statusNames = Object.fromEntries(
+    Object.entries(statuses).map(([key, config]) => [key, config.n])
+  );
+
+  if (kind === 'csv') {
+    const blob = new Blob([buildLotCsv(rows, projectName, statusNames)], {
+      type: 'text/csv;charset=utf-8',
+    });
+    downloadBlob(`${filenameStem}.csv`, blob);
+    showToast(toastElement, `Exported ${filtered ? 'filtered' : 'all'} lot rows as CSV.`);
+    return Promise.resolve();
+  }
+
+  return exportLotsToXlsx(rows, projectName, filenameStem, statusNames).then(() => {
+    showToast(toastElement, `Exported ${filtered ? 'filtered' : 'all'} lot rows as XLSX.`);
+  });
+}
+
 const lotPanel = initLotPanel(stage, {
   onSave: async (input) => {
     const normalize = (value: string): string => value.trim().toLocaleUpperCase();
@@ -347,6 +370,12 @@ const lotTable = initLotTable(stage, lotTableButton, {
     lotRows = lotRows.filter((candidate) => candidate.id !== row.id);
     lotTable.setRows(lotRows);
     showToast(toastElement, `Register entry ${row.phase}/${row.block}/${row.lot} deleted.`);
+  },
+  onExportCsv: (rows, filtered) => {
+    void exportLotRows(rows, 'csv', filtered);
+  },
+  onExportXlsx: (rows, filtered) => {
+    void exportLotRows(rows, 'xlsx', filtered);
   },
   onError: (message) => showToast(toastElement, `Lot register action failed: ${message}`),
 });

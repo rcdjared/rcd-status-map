@@ -13,7 +13,7 @@ the v2 phase sequence.
 | 2 | Persistent undo | n/a | n/a | [ ] |
 | 3 | Access rules and hardening | [ ] | [ ] | [ ] |
 | 4 | Register schema | [x] | [ ] | [ ] |
-| 5 | Register API | [ ] | [ ] | [ ] |
+| 5 | Register API | [x] | [ ] | [ ] |
 | 6 | Side panel form | n/a | n/a | [ ] |
 | 7 | Table view | n/a | n/a | [ ] |
 | 8 | Summary and export | n/a | n/a | [ ] |
@@ -114,7 +114,7 @@ the v2 phase sequence.
   PR merge remain outstanding. This report does not independently confirm
   production state.
 
-### Phase 5 — Register API and atomic save (implementation in progress)
+### Phase 5 — Register API and atomic save (dev verified; production pending)
 
 - Added migration 015 with invoker-rights RPCs for atomic register/mark saves
   and status updates, plus typed client API and rollback-only verification SQL.
@@ -123,5 +123,23 @@ the v2 phase sequence.
 - `npm run build`, `npm run lint`, `npm test` (4 tests), and `git diff --check`
   pass. The SQL verification was not run locally; PostgreSQL tooling and a live
   database connection are unavailable in this workspace.
-- Not yet applied to dev. Apply and verify migrations 014-015 in dev before
-  considering Phase 5 complete; production remains untouched.
+- User reports: `PASS: save, edit, link, conflict ID, and atomic status mirroring; fixtures rolled back.`
+- Dev verification is recorded as passed. Production application and PR merge
+  remain outstanding.
+
+### Phase 6 — Side panel form (implementation in progress)
+
+- Starting the editor-only form, persistent per-project PBL defaults, duplicate
+  handling, and in-place map repaint wiring.
+- Atomic undo of a linked register/mark status needs a database operation; this
+  phase adds it so the roadmap's undo action cannot leave the two statuses out
+  of sync.
+- Added migration 016 and a rollback-only undo test, plus the lot side panel,
+  sticky fields, duplicate guidance/highlight, paint integration, and 5-second
+  status undo action.
+- User reports: `PASS: linked lot status undo is atomic; fixtures rolled back.`
+  The Phase 6 database undo verification is recorded as passed.
+- `npm run build`, `npm run lint`, `npm test` (4 tests), and `git diff --check`
+  pass; build retains the existing large-chunk warning. Browser/manual checks
+  for the lot panel, duplicate correction, sticky fields, repaint, and Undo
+  remain outstanding before Phase 6 is complete.

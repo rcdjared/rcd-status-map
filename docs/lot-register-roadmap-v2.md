@@ -488,7 +488,11 @@ PHASE 6: side panel form. Create src/ui/lot-panel.ts and styles following existi
 
 0. Hit-test and repaint: reuse the existing hit-test (scan marks; spans rebuilt from the seed point). Add a label buffer only if click latency on the largest map measures slow. Ignore boundary-pixel clicks. Phase 1 already guarantees one mark per lot and in-place updates; do not reintroduce delete-and-reinsert.
    - Unpainted lot: create the mark and open the blank form.
-   - Painted lot, selected status chip differs: update the mark and its row via saveLot, show a 5-second undo toast that calls undoStatusChange from Phase 2, then open the panel in edit mode.
+   - Painted lot, selected status chip differs: update the mark and its row via
+     saveLot, show a 5-second undo toast, then open the panel in edit mode. For
+     a register-linked mark, undo must restore the register and mark atomically
+     and reject stale history; an unlabeled mark uses undoStatusChange from
+     Phase 2.
    - Painted lot, same status: change nothing, open the panel in edit mode.
    - Dragging pans and never paints; make sure the end of a pan does not trigger a click.
 1. Fields: Phase, Block, Lot, Status. Viewers never see the panel.
@@ -499,6 +503,8 @@ PHASE 6: side panel form. Create src/ui/lot-panel.ts and styles following existi
 6. If the existing row is unmapped, link it without a warning and say so.
 7. Accessibility: labels bound to inputs, aria-live for the warning, visible focus.
 Keep edits to main.ts and painting code limited to wiring.
+Database change: add the minimal invoker-rights RPC needed for atomic undo of a
+linked register and mark status, with a stale-history check.
 ```
 
 **Done when**

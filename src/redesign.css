@@ -150,6 +150,135 @@ input:focus-visible,
   flex-direction: column;
 }
 
+.lot-panel {
+  position: absolute;
+  z-index: 20;
+  top: 14px;
+  right: 14px;
+  width: min(360px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
+  overflow-y: auto;
+  padding: 18px;
+  color: var(--tx);
+  background: var(--sf);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  box-shadow: var(--sh);
+  user-select: text;
+}
+
+.lot-panel[hidden] {
+  display: none;
+}
+
+.lot-panel-header,
+.lot-panel-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lot-panel-header h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.lot-panel-header p {
+  margin: 5px 0 0;
+  color: var(--mu);
+  font-size: 12px;
+}
+
+.lot-panel-close {
+  border: 0;
+  background: transparent;
+  color: var(--tx);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.lot-panel-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.lot-panel-form label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lot-panel-form input,
+.lot-panel-form select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  color: var(--tx);
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+}
+
+.lot-panel-form input:focus-visible,
+.lot-panel-form select:focus-visible,
+.lot-panel button:focus-visible {
+  outline: 3px solid var(--brand-green);
+  outline-offset: 2px;
+}
+
+.lot-panel-message,
+.lot-panel-warning {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.lot-panel-message {
+  color: var(--brand-green);
+}
+
+.lot-panel-warning {
+  color: #b42318;
+}
+
+.lot-panel-show-existing {
+  justify-self: start;
+  padding: 6px 0;
+  color: var(--brand-green);
+  border: 0;
+  background: transparent;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.lot-panel-actions {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.lot-panel-actions button {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  color: var(--tx);
+  background: var(--sf);
+}
+
+.lot-panel-actions .lot-panel-save {
+  color: #fff;
+  border-color: var(--brand-green);
+  background: var(--brand-green);
+  font-weight: 700;
+}
+
+.lot-panel-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .topbar {
   background: var(--sf);
   border-bottom: 1px solid var(--bd);
@@ -648,6 +777,12 @@ body.role-viewer .chip-add {
 }
 
 @media (max-width: 720px) {
+  .lot-panel {
+    top: 8px;
+    right: 8px;
+    width: min(360px, calc(100% - 16px));
+    max-height: calc(100% - 16px);
+  }
   #app-root {
     flex-direction: column-reverse;
   }

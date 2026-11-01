@@ -396,6 +396,7 @@ button.on {
 
 #t {
   position: fixed;
+  z-index: 1000;
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
@@ -410,6 +411,28 @@ button.on {
 
 #t.s {
   opacity: 1;
+}
+
+#t.has-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+#t.has-action button {
+  padding: 3px 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 700;
+}
+
+#t.has-action button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 select {

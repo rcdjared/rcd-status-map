@@ -153,6 +153,29 @@ export async function updateLotStatus(
   }
 }
 
+export async function undoLotStatus(
+  id: string,
+  previousStatus: string
+): Promise<LotRegisterRow> {
+  try {
+    const { data, error } = await supabase
+      .rpc('undo_lot_status', {
+        p_lot_id: id,
+        p_previous_status: previousStatus,
+      })
+      .returns<LotRegisterRow[]>()
+      .single();
+
+    throwOnDatabaseError(error);
+    if (!data) {
+      throw new LotRegisterApiError('Undoing the lot status returned no register row.');
+    }
+    return data;
+  } catch (error) {
+    throw mapThrownError(error);
+  }
+}
+
 export async function deleteLot(id: string): Promise<void> {
   try {
     const { data, error } = await supabase

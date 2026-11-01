@@ -51,7 +51,13 @@ import {
   clearAllMarks,
   subscribeToMarks,
 } from './api/marks';
-import type { MarkRow } from './api/supabase';
+import type { LotRegisterRow, MarkRow } from './api/supabase';
+import {
+  listLots,
+  saveLot,
+  subscribeLots,
+  undoLotStatus,
+} from './api/lotRegister';
 import { loadProjects, loadProjectMapImage, populateProjectSelect } from './api/projects';
 import {
   initAuth,
@@ -60,7 +66,7 @@ import {
   showDisabledScreen,
 } from './ui/auth';
 import { renderChips, selectChip, updateChipCounts } from './ui/chips';
-import { showToast } from './ui/toast';
+import { showActionToast, showToast } from './ui/toast';
 import { initUsersManagement } from './ui/users';
 import { initMapModals } from './ui/map-modals';
 import { initDuplicateCleanup, setDuplicateCleanupAdmin } from './ui/duplicate-cleanup';
@@ -73,6 +79,7 @@ import {
   initModeButtons,
   setToolbarMode,
 } from './ui/toolbar';
+import { initLotPanel } from './ui/lot-panel';
 
 // DOM Elements
 const baseCanvas = document.querySelector<HTMLCanvasElement>('#base')!;
@@ -155,6 +162,7 @@ let currentUserRole: 'admin' | 'editor' | 'viewer' | 'disabled' = 'viewer';
 let currentProjectId: string | null = null;
 let currentProject: Project | null = null;
 let marksSubscriptionCleanup: (() => void) | null = null;
+let lotsSubscriptionCleanup: (() => void) | null = null;
 let projectStatusSubscriptionCleanup: (() => void) | null = null;
 let usersManager: ReturnType<typeof initUsersManagement> | null = null;
 
@@ -166,12 +174,73 @@ let pinRadius = 0;
 let barrierMap: Uint8Array | null = null;
 
 let marks: Mark[] = [];
+let lotRows: LotRegisterRow[] = [];
 let history: UndoAction[] = [];
 let legendDragStartPosition: [number, number] | null = null;
 let legendPos: [number, number] = [0, 0];
 let currentStatus = 'c';
 let currentMode: PaintMode = 'fill';
 let currentZoom = 1;
+let highlightedMarkId: string | null = null;
+let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+function upsertLotRow(row: LotRegisterRow): void {
+  const index = lotRows.findIndex((lot) => lot.id === row.id);
+  if (index >= 0) lotRows[index] = row;
+  else lotRows.push(row);
+}
+
+function showExistingLot(rowId: string): void {
+  const row = lotRows.find((candidate) => candidate.id === rowId);
+  if (!row?.mark_id) {
+    showToast(toastElement, 'The existing lot is not linked to a map fill.');
+    return;
+  }
+  highlightMapMark(row.mark_id);
+}
+
+const lotPanel = initLotPanel(stage, {
+  onSave: async (input) => {
+    const normalize = (value: string): string => value.trim().toLocaleUpperCase();
+    lotRows = await listLots(input.projectId);
+    const unmappedMatch = lotRows.find(
+      (row) =>
+        row.mark_id === null &&
+        row.project_id === input.projectId &&
+        row.phase === normalize(input.phase) &&
+        row.block === normalize(input.block) &&
+        row.lot === normalize(input.lot)
+    );
+    const row = await saveLot(input);
+    upsertLotRow(row);
+    const mark = marks.find((candidate) => candidate.id === input.markId);
+    if (mark && mark.s !== row.status) {
+      const previousStatus = mark.s;
+      mark.s = row.status;
+      mark.updated_at = row.updated_at;
+      mark.updated_by = row.updated_by;
+      recordUndo({
+        kind: 'status',
+        markId: mark.id!,
+        previousStatus,
+        newStatus: row.status,
+      });
+      if (statuses[row.status]) setStatus(row.status);
+      renderAll();
+      saveState();
+      showActionToast(toastElement, 'Lot status updated.', 'Undo', async () => undo(), 5000);
+    }
+    return {
+      row,
+      linkedExisting: Boolean(unmappedMatch && unmappedMatch.id === row.id),
+    };
+  },
+  onShowExisting: showExistingLot,
+  getExistingLotLabel: (rowId) => {
+    const row = lotRows.find((candidate) => candidate.id === rowId);
+    return row ? `${row.phase}/${row.block}/${row.lot}` : null;
+  },
+});
 
 // 2D Pan and Drag State (supports dragging in all directions)
 let panX = 0;
@@ -332,6 +401,7 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   const isAdmin = role === 'admin';
   const isEditor = role === 'editor';
   const canEdit = isAdmin || isEditor;
+  if (!canEdit) lotPanel.hide();
 
   if (canEdit) {
     document.body.classList.remove('role-viewer');
@@ -404,16 +474,24 @@ function applyUserRole(role: 'admin' | 'editor' | 'viewer' | 'disabled'): void {
   }
 }
 
-function setupRealtimeForCurrentProject(projectId: string): void {
+function clearProjectSubscriptions(): void {
   if (marksSubscriptionCleanup) {
     marksSubscriptionCleanup();
     marksSubscriptionCleanup = null;
+  }
+  if (lotsSubscriptionCleanup) {
+    lotsSubscriptionCleanup();
+    lotsSubscriptionCleanup = null;
   }
 
   if (projectStatusSubscriptionCleanup) {
     projectStatusSubscriptionCleanup();
     projectStatusSubscriptionCleanup = null;
   }
+}
+
+function setupRealtimeForCurrentProject(projectId: string): void {
+  clearProjectSubscriptions();
 
   projectStatusSubscriptionCleanup = subscribeToProjectStatusConfig(projectId, (config) => {
     if (!config) return;
@@ -461,6 +539,14 @@ function setupRealtimeForCurrentProject(projectId: string): void {
       saveState();
     }
   });
+
+  lotsSubscriptionCleanup = subscribeLots(projectId, {
+    onInsert: upsertLotRow,
+    onUpdate: upsertLotRow,
+    onDelete: ({ id }) => {
+      lotRows = lotRows.filter((row) => row.id !== id);
+    },
+  });
 }
 
 function renderAll(): void {
@@ -477,8 +563,74 @@ function renderAll(): void {
     mapHeight,
     pinRadius
   );
+  if (highlightedMarkId) {
+    const highlighted = marks.find((mark) => mark.id === highlightedMarkId);
+    if (highlighted) {
+      pinsCtx.save();
+      pinsCtx.strokeStyle = '#facc15';
+      pinsCtx.lineWidth = Math.max(3, mapWidth * 0.003);
+      pinsCtx.shadowColor = '#111';
+      pinsCtx.shadowBlur = Math.max(3, mapWidth * 0.002);
+      if (highlighted.t === 'f' && highlighted.sp?.length) {
+        let left = mapWidth;
+        let right = 0;
+        let top = mapHeight;
+        let bottom = 0;
+        for (const [y, start, end] of highlighted.sp) {
+          left = Math.min(left, start);
+          right = Math.max(right, end);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+        pinsCtx.strokeRect(left, top, right - left + 1, bottom - top + 1);
+      } else {
+        pinsCtx.beginPath();
+        pinsCtx.arc(highlighted.x, highlighted.y, pinRadius * 1.8, 0, Math.PI * 2);
+        pinsCtx.stroke();
+      }
+      pinsCtx.restore();
+    }
+  }
   updateChipCounts(chipsContainer, counts);
   selectChip(chipsContainer, currentStatus, statuses);
+}
+
+function highlightMapMark(markId: string): void {
+  const mark = marks.find((candidate) => candidate.id === markId);
+  if (!mark) {
+    showToast(toastElement, 'The existing lot mark is not loaded on this map.');
+    return;
+  }
+
+  highlightedMarkId = markId;
+  panX = stage.clientWidth / 2 - mark.x * currentZoom;
+  panY = stage.clientHeight / 2 - mark.y * currentZoom;
+  applyTransform(box, panX, panY);
+  renderAll();
+
+  if (highlightTimer) clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => {
+    highlightedMarkId = null;
+    highlightTimer = undefined;
+    renderAll();
+  }, 3000);
+}
+
+function openLotPanelFor(mark: Mark): void {
+  if (
+    mark.t !== 'f' ||
+    !mark.id ||
+    !currentUser ||
+    !currentProjectId ||
+    (currentUserRole !== 'admin' && currentUserRole !== 'editor')
+  ) {
+    return;
+  }
+  const row = lotRows.find((candidate) => candidate.mark_id === mark.id) ?? null;
+  lotPanel.open(
+    { projectId: currentProjectId, markId: mark.id, status: mark.s, row },
+    statuses
+  );
 }
 
 function refreshStatusUi(): void {
@@ -532,6 +684,7 @@ function setZoom(factor: number): void {
 async function undo(): Promise<void> {
   const action = history.at(-1);
   if (!action) return;
+  lotPanel.close();
   if (!currentUser || !currentProjectId) {
     showToast(toastElement, 'Undo requires a connected project. No local-only undo was applied.');
     return;
@@ -582,10 +735,20 @@ async function undo(): Promise<void> {
         failure = new Error('This mark changed since your edit. Refresh before undoing.');
         break;
       }
-      const { data, error } = await undoStatusChange(inverse.markId, inverse.previousStatus);
-      if (error || !data) {
-        failure = error || new Error('Status undo returned no updated mark.');
-        break;
+      const linkedLot = lotRows.find((row) => row.mark_id === inverse.markId);
+      if (linkedLot) {
+        try {
+          upsertLotRow(await undoLotStatus(linkedLot.id, inverse.previousStatus));
+        } catch (error) {
+          failure = error instanceof Error ? error : new Error(String(error));
+          break;
+        }
+      } else {
+        const { data, error } = await undoStatusChange(inverse.markId, inverse.previousStatus);
+        if (error || !data) {
+          failure = error || new Error('Status undo returned no updated mark.');
+          break;
+        }
       }
       touchedMarks.add(inverse.markId);
     } else if (inverse.kind === 'legend') {
@@ -786,6 +949,9 @@ async function resolveProjectId(mapIndex: number): Promise<string | null> {
 // Map Loading
 async function openMap(index: number): Promise<void> {
   currentMapIndex = index;
+  clearProjectSubscriptions();
+  lotPanel.close();
+  lotRows = [];
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -836,6 +1002,12 @@ async function openMap(index: number): Promise<void> {
       } else if (error) {
         showToast(toastElement, `Could not load saved marks: ${error.message}`);
       }
+      try {
+        lotRows = await listLots(currentProjectId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        showToast(toastElement, `Could not load lot register: ${message}`);
+      }
 
       // Connect realtime updates
       setupRealtimeForCurrentProject(currentProjectId);
@@ -881,8 +1053,11 @@ async function openMap(index: number): Promise<void> {
  * Loads a project directly from its Supabase record.
  */
 async function openProject(proj: Project): Promise<void> {
+  clearProjectSubscriptions();
   currentProjectId = proj.id;
   currentProject = proj;
+  lotPanel.close();
+  lotRows = [];
   const thisToken = ++mapToken;
 
   loadingIndicator.style.display = 'grid';
@@ -914,6 +1089,12 @@ async function openProject(proj: Project): Promise<void> {
       saveState();
     } else if (error) {
       showToast(toastElement, `Could not load saved marks: ${error.message}`);
+    }
+    try {
+      lotRows = await listLots(proj.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(toastElement, `Could not load lot register: ${message}`);
     }
 
     setupRealtimeForCurrentProject(proj.id);
@@ -1011,17 +1192,38 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
         showToast(toastElement, 'Cannot update a fill without its saved mark ID.');
         return;
       }
-      const { data, error } = await updateMark(result.updatedMark.id, {
-        status: result.updatedMark.s,
-        updated_by: currentUser.id,
-      });
-      if (error || !data) {
-        showToast(toastElement, `Could not update fill: ${error?.message || 'No row returned'}`);
-        return;
+      const linkedLot = lotRows.find((row) => row.mark_id === result.updatedMark?.id);
+      if (linkedLot) {
+        try {
+          const updatedLot = await saveLot({
+            projectId: currentProjectId,
+            markId: result.updatedMark.id,
+            phase: linkedLot.phase,
+            block: linkedLot.block,
+            lot: linkedLot.lot,
+            status: result.updatedMark.s,
+          });
+          upsertLotRow(updatedLot);
+          result.updatedMark.updated_at = updatedLot.updated_at;
+          result.updatedMark.updated_by = updatedLot.updated_by;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          showToast(toastElement, `Could not atomically update lot status: ${message}`);
+          return;
+        }
+      } else {
+        const { data, error } = await updateMark(result.updatedMark.id, {
+          status: result.updatedMark.s,
+          updated_by: currentUser.id,
+        });
+        if (error || !data) {
+          showToast(toastElement, `Could not update fill: ${error?.message || 'No row returned'}`);
+          return;
+        }
+        result.updatedMark.updated_at = data.updated_at;
+        result.updatedMark.updated_by = data.updated_by;
       }
       remoteChanged = true;
-      result.updatedMark.updated_at = data.updated_at;
-      result.updatedMark.updated_by = data.updated_by;
     }
 
     const marksToDelete = [
@@ -1094,6 +1296,23 @@ async function processMapClick(clientX: number, clientY: number): Promise<void> 
     }
     refreshStatusUi();
     saveState();
+
+    const fillForPanel = result.updatedMark?.t === 'f'
+      ? result.updatedMark
+      : result.addedMark?.t === 'f'
+        ? result.addedMark
+        : null;
+    if (fillForPanel) openLotPanelFor(fillForPanel);
+
+    if (result.updatedMark && previousMark && previousMark.s !== result.updatedMark.s) {
+      showActionToast(
+        toastElement,
+        'Lot status updated.',
+        'Undo',
+        async () => undo(),
+        5000
+      );
+    }
   }
 }
 

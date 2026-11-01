@@ -206,6 +206,13 @@ export interface Database {
         };
         Returns: LotRegisterRow[];
       };
+      undo_lot_status: {
+        Args: {
+          p_lot_id: string;
+          p_previous_status: string;
+        };
+        Returns: LotRegisterRow[];
+      };
     };
     Enums: {
       [_ in never]: never;

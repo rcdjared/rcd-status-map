@@ -1811,6 +1811,7 @@ stage.addEventListener('contextmenu', (e: MouseEvent) => {
 stage.addEventListener(
   'wheel',
   (e: WheelEvent) => {
+    if (e.target instanceof Element && e.target.closest('.lot-table-panel')) return;
     e.preventDefault();
     if (!mapWidth || !mapHeight) return;
 
